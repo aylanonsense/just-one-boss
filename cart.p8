@@ -44,6 +44,12 @@ local color_ramps={
 	{7,7,7,15,9,4,1,0}
 }
 color_ramps[0]={7,5,1,0,0,0,0,0}
+local mirrored_directions={
+	left="right",
+	right="left",
+	up="up",
+	down="down"
+}
 
 -- global scene vars
 local scenes
@@ -85,6 +91,9 @@ local entity_classes={
 		vertical_move_increments={1,2,2,3},
 		teeter_frames=0,
 		stun_frames=0,
+		primary_color=12,
+		secondary_color=13,
+		eye_color=0,
 		update=function(self)
 			decrement_counter_prop(self,"stun_frames")
 			if decrement_counter_prop(self,"teeter_frames") and self.next_move_dir then
@@ -155,13 +164,13 @@ local entity_classes={
 		end,
 		on_hurt=function(self)
 			self:stun()
-			freeze_frames=max(freeze_frames,6)
+			freeze_frames=max(freeze_frames,4)
 			screen_shake_frames=max(screen_shake_frames,12)
 		end,
 		stun=function(self)
 			-- self:cancel_move(self:col(),self:row())
 			self.invincibility_frames=60
-			self.stun_frames=15
+			self.stun_frames=19
 		end,
 		draw=function(self)
 			local x=self.x
@@ -205,18 +214,42 @@ local entity_classes={
 				end
 				local f=self.teeter_frames%4<2
 				palt(ternary(f,8,9),true)
-				pal(ternary(f,9,8),13)
+				pal(ternary(f,9,8),self.secondary_color)
 			elseif self.move_frames>0 then
 				sprite_x+=40-11*self.move_frames
 				sprite_dx+=ternary(sprite_flipped,0,4)
 				sprite_width+=4
 			end
-			-- pal(1,3)
-			-- pal(12,11)
-			-- pal(13,3)
+			pal(12,self.primary_color)
+		pal(13,self.secondary_color)
+			pal(1,self.eye_color)
 			sspr(sprite_x,sprite_y,sprite_width,sprite_height,x-sprite_dx,y-sprite_dy,sprite_width,sprite_height,sprite_flipped)
 			-- rect(left,top,right,bottom,8)
 		end
+	},
+	player_reflection={
+		extends="player",
+		update_priority=10,
+		primary_color=11,
+		secondary_color=3,
+		eye_color=3,
+		update=function(self)
+			self:copy_player()
+		end,
+		copy_player=function(self)
+			self.x=80-player.x
+			self.y=player.y
+			self.facing=mirrored_directions[player.facing]
+			self.move_dir=ternary(player.move_dir,mirrored_directions[player.move_dir],nil)
+			self.move_frames=player.move_frames
+			self.teeter_frames=player.teeter_frames
+			self.stun_frames=player.stun_frames
+			self.invincibility_frames=player.invincibility_frames
+		end,
+		on_hurt=function(self,entity)
+			player:on_hurt(entity)
+			self:copy_player()
+		end,
 	},
 	heart={
 		draw=function(self)
@@ -227,12 +260,43 @@ local entity_classes={
 			sspr(ternary(self.frames_alive%30<20,114,121),0,7,6,self.x-3,self.y-5)
 		end
 	},
+	hourglass={
+		hitbox_channel=1, --player
+		frames_to_death=89,
+		vx=1,
+		check_for_hits=function(self,entity)
+			return self:col()==entity:col() and self:row()==entity:row()
+		end,
+		draw=function(self)
+			palt(11,true)
+			local f=flr(self.frames_alive/2.5)%4
+			if self.vx>0 then
+				f=(4-f)%4
+			end
+			sspr(7+9*f,85,9,9,self.x-4,self.y-ternary(f==0,7,9))
+			-- pset(self.x,self.y,8)
+		end
+	},
 	cosmonas={
 		init=function(self)
 			self.head=spawn_entity("cosmonas_head",{x=5,y=-10})
-			self.left_hand=spawn_entity("cosmonas_hand",{x=self.x-53,y=self.y+50,flipped=true})
-			self.right_hand=spawn_entity("cosmonas_hand",{x=self.x+53,y=self.y+50})
+			self.left_hand=spawn_entity("cosmonas_hand",{x=self.x,y=self.y,dir=1})
+			self.right_hand=spawn_entity("cosmonas_hand",{x=self.x,y=self.y,dir=-1})
+
 			self.head:fire_laser()
+
+			self.left_hand:move_to(-10,4-8,10)
+			self.left_hand:translate(0,16,30)
+			self.left_hand:fire_hourglass()
+			self.left_hand:translate(0,16,30)
+			self.left_hand:fire_hourglass()
+
+			self.right_hand:move_to(90,4,10)
+			self.right_hand:fire_hourglass()
+			self.right_hand:translate(0,16,30)
+			self.right_hand:fire_hourglass()
+			self.right_hand:translate(0,16,30)
+			self.right_hand:fire_hourglass()
 		end
 	},
 	cosmonas_head={
@@ -287,28 +351,58 @@ local entity_classes={
 			self:fire_laser()
 		end,
 		fire_laser=function(self)
-			self:queue_states({
-				"open_jaw",14,
-				"charge_laser",16,
-				"pause",12,
-				"laser_preview",8,
-				"laser",35,
-				"laser_preview",2,
-				"pause",14,
-				"close_jaw",14,
-				"pause",12
-			})
+			self:queue_state("open_jaw",14)
+			self:queue_state("charge_laser",16)
+			self:queue_state("pause",12)
+			self:queue_state("laser_preview",8)
+			self:queue_state("laser",35)
+			self:queue_state("laser_preview",2)
+			self:queue_state("pause",14)
+			self:queue_state("close_jaw",14)
+			self:queue_state("pause",12)
 		end
 	},
 	cosmonas_hand={
+		update=function(self)
+			if self.state=="charge_up" and self.state_frames%2==0 then
+				local r=rnd_int(140,210)
+				spawn_entity("spark",{x=self.x-self.dir*20*cos(r/360),y=self.y+20*sin(r/360),target_x=self.x,target_y=self.y,color=10})
+			elseif self.state=="move" then
+				self.vx=(self.state_data.x-self.x)/(1+self.state_end-self.state_frames)
+				self.vy=(self.state_data.y-self.y)/(1+self.state_end-self.state_frames)
+				self:apply_velocity()
+			end
+		end,
 		draw=function(self)
 			palt(11,true)
-			if self.flipped then
-				sspr(7,68,14,17,self.x-8,self.y-7)
+			if self.dir>0 then
+				sspr(7,68,14,17,self.x-8,self.y-8)
 			else
-				sspr(7,68,14,17,self.x-5,self.y-7,14,17,true)
+				sspr(7,68,14,17,self.x-5,self.y-8,14,17,true)
 			end
-			-- pset(self.x,self.y,8)
+		end,
+		on_enter_state=function(self)
+			if self.state=="translate" then
+				self.state="move"
+				self.state_data.x+=self.x
+				self.state_data.y+=self.y
+			elseif self.state=="poof" then
+				spawn_entity("poof",{x=self.x+self.dir*4,y=self.y})
+			elseif self.state=="hourglass" then
+				spawn_entity("hourglass",{x=self.x+self.dir*4,y=self.y,vx=self.dir})
+			end
+		end,
+		move_to=function(self,x,y,dur)
+			self:queue_state("move",dur,{x=x,y=y})
+		end,
+		translate=function(self,dx,dy,dur)
+			self:queue_state("translate",dur,{x=dx,y=dy})
+		end,
+		fire_hourglass=function(self)
+			self:queue_state("charge_up",14)
+			self:queue_state("pause",10)
+			self:queue_state("poof",3)
+			self:queue_state("hourglass",3)
 		end
 	},
 	spark={
@@ -324,6 +418,13 @@ local entity_classes={
 			local x2,y2=x+self.percent*dx,y+self.percent*dy
 			color(color_ramps[self.color][mid(1,6-flr(self.frames_alive/3),6)])
 			pset(x2,y2)
+		end
+	},
+	poof={
+		frames_to_death=16,
+		draw=function(self)
+			palt(11,true)
+			sspr(13*flr(self.frames_alive/4),94,13,14,self.x-7,self.y-7)
 		end
 	},
 	comet={
@@ -447,9 +548,16 @@ function init_game()
 	-- reset everything
 	entities,new_entities={},{}
 	-- create initial entities
-	spawn_entity("player",{x=10*3+5,y=8*2+4})
+	player=spawn_entity("player",{x=10*3+5,y=8*2+4})
+	spawn_entity("player_reflection",{x=10*4+5,y=8*2+4})
 	spawn_entity("cosmonas",{x=40,y=-44})
 	spawn_entity("heart",{x=10*5+5,y=8*3+4})
+	spawn_entity("poof",{x=10*7+5,y=8*3+4})
+	-- spawn_entity("hourglass",{x=10*8+5,y=8*0+4,vx=-1})
+	-- spawn_entity("hourglass",{x=10*8+5,y=8*2+4,vx=-1})
+	-- spawn_entity("hourglass",{x=10*8+5,y=8*4+4,vx=-1})
+	-- spawn_entity("hourglass",{x=10*-1+5,y=8*1+4})
+	-- spawn_entity("hourglass",{x=10*-1+5,y=8*3+4})
 	-- create tiles
 	create_tiles(levels[1])
 	-- immediately add new entities to the game
@@ -474,9 +582,9 @@ function update_game()
 			entity:die()
 		end
 	end
-	if scene_frame%7==0 then
-		spawn_entity("comet",{color=rnd_from_list({14}),x=40,y=-30,target_x=5+10*rnd_int(0,7),target_y=4+8*rnd_int(0,4),vx=rnd_int(-3,3),vy=rnd_int(-5,-4)})
-	end
+	-- if scene_frame%7==0 then
+	-- 	spawn_entity("comet",{color=rnd_from_list({14}),x=40,y=-30,target_x=5+10*rnd_int(0,7),target_y=4+8*rnd_int(0,4),vx=rnd_int(-3,3),vy=rnd_int(-5,-4)})
+	-- end
 	-- check for hits
 	local i,j,entity,entity2
 	for i=1,#entities do
@@ -533,6 +641,7 @@ function draw_game()
 	foreach(entities,function(entity)
 		entity:draw()
 		pal()
+		-- pset(entity.x,entity.y,8)
 	end)
 	-- draw color ramps
 	-- camera()
@@ -546,101 +655,117 @@ end
 
 
 -- entity functions
-function spawn_entity(class_name,args)
-	-- create default entity
-	local entity,k,v={
-		is_alive=true,
-		frames_alive=0,
-		frames_to_death=0,
-		render_layer=5,
-		update_priority=5,
-		-- hit props
-		hitbox_channel=0,
-		hurtbox_channel=0,
-		invincibility_frames=0,
-		-- state props
-		state=nil,
-		future_state_data={},
-		state_frames=0,
-		state_end=-1,
-		-- spatial props
-		x=0,
-		y=0,
-		z=0,
-		vx=0,
-		vy=0,
-		vz=0,
-		-- entity methods
-		add_to_game=noop,
-		init=noop,
-		update=function(self)
-			self:apply_velocity()
-		end,
-		draw=noop,
-		on_death=noop,
-		on_collide=noop,
-		col=function(self)
-			return 1+flr(self.x/10)
-		end,
-		row=function(self)
-			return 1+flr(self.y/8)
-		end,
-		die=function(self)
-			self:on_death()
-			self.is_alive=false
-		end,
-		apply_velocity=function(self)
-			self.x+=self.vx
-			self.y+=self.vy
-			self.z+=self.vz
-		end,
-		-- hit methods
-		check_for_hits=noop,
-		on_hit=noop,
-		on_hurt=noop,
-		-- state methods
-		queue_state=function(self,state,state_end)
-			add(self.future_state_data,state)
-			add(self.future_state_data,state_end or -1)
-		end,
-		queue_states=function(self,states)
-			local i
-			for i=1,#states,2 do
-				self:queue_state(states[i],states[i+1])
-			end
-		end,
-		on_enter_state=noop,
-		on_no_state=noop,
-		check_for_state_change=function(self)
-			if (self.state and self.state_end>=0 and self.state_frames>self.state_end) or (not self.state and #self.future_state_data>0) then
-				self.state=nil
-				self.state_frames=0
-				self.state_end=-1
-				if #self.future_state_data>0 then
-					self.state=remove_first(self.future_state_data)
-					self.state_end=remove_first(self.future_state_data)
-					self:on_enter_state(self.state)
-					if self.state_end==0 then
-						self:check_for_state_change()
+function spawn_entity(class_name,args,skip_init)
+	local super_class_name=entity_classes[class_name].extends
+	local k,v
+	local entity
+	if super_class_name then
+		entity=spawn_entity(super_class_name,args,true)
+	else
+		-- create default entity
+		entity={
+			is_alive=true,
+			frames_alive=0,
+			frames_to_death=0,
+			render_layer=5,
+			update_priority=5,
+			-- hit props
+			hitbox_channel=0,
+			hurtbox_channel=0,
+			invincibility_frames=0,
+			-- state props
+			state=nil,
+			future_state_data={},
+			state_frames=0,
+			state_end=-1,
+			state_data=nil,
+			-- spatial props
+			x=0,
+			y=0,
+			z=0,
+			vx=0,
+			vy=0,
+			vz=0,
+			-- entity methods
+			add_to_game=noop,
+			init=noop,
+			update=function(self)
+				self:apply_velocity()
+			end,
+			draw=noop,
+			on_death=noop,
+			on_collide=noop,
+			col=function(self)
+				return 1+flr(self.x/10)
+			end,
+			row=function(self)
+				return 1+flr(self.y/8)
+			end,
+			die=function(self)
+				self:on_death()
+				self.is_alive=false
+			end,
+			apply_velocity=function(self)
+				self.x+=self.vx
+				self.y+=self.vy
+				self.z+=self.vz
+			end,
+			-- hit methods
+			check_for_hits=noop,
+			on_hit=noop,
+			on_hurt=noop,
+			-- state methods
+			queue_state=function(self,state,state_end,state_data)
+				add(self.future_state_data,state)
+				add(self.future_state_data,state_end or -1)
+				add(self.future_state_data,state_data or false)
+			end,
+			queue_states=function(self,states)
+				local i
+				for i=1,#states,3 do
+					self:queue_state(states[i],states[i+1],states[i+2])
+				end
+			end,
+			on_enter_state=noop,
+			on_no_state=noop,
+			check_for_state_change=function(self)
+				if (self.state and self.state_end>=0 and self.state_frames>self.state_end) or (not self.state and #self.future_state_data>0) then
+					self.state=nil
+					self.state_frames=0
+					self.state_data=nil
+					self.state_end=-1
+					if #self.future_state_data>0 then
+						self.state=remove_first(self.future_state_data)
+						self.state_end=remove_first(self.future_state_data)
+						self.state_data=remove_first(self.future_state_data)
+						self:on_enter_state(self.state)
+						if self.state_end==0 then
+							self:check_for_state_change()
+						end
+					else
+						self:on_no_state()
 					end
-				else
-					self:on_no_state()
 				end
 			end
-		end
-	}
+		}
+	end
 	-- add class properties/methods onto it
 	for k,v in pairs(entity_classes[class_name]) do
+		if super_class_name and type(entity[k])=="function" then
+			entity["super_"..k]=entity[k]
+		end
 		entity[k]=v
 	end
 	-- add properties onto it from the arguments
 	for k,v in pairs(args or {}) do
 		entity[k]=v
 	end
-	-- initialize it
-	entity:init(args or {})
-	-- add it to the list of entities-to-be-added
-	add(new_entities,entity)
+	if not skip_init then
+		-- initialize it
+		entity:init(args or {})
+		-- add it to the list of entities-to-be-added
+		add(new_entities,entity)
+	end
 	-- return it
 	return entity
 end
@@ -909,29 +1034,29 @@ b0d17dfb007d007d0077b00000000000000000000000000000000000000000000000000000000000
 b0d17f7b007700777007700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 b0d1717b00700007d000b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 b001111bbbbbbbbb77bbb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-b0011110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-bbb11110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00dbbbb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-007000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-007000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00f71710000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00b77770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00bffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+b001111bb99999bbbbb9bbbbbbbbbbbbbbbbbbb9bbb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+bbb1111b0700070bb0907000bb0000000bb0007f90b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00dbbbbb0700070bb9007000b977000779b0007ff9b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+007000bb007f700b90007000b900707ff9b0007fff90000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+007000bb0007000bb777f777b900f7fff9b777f777b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00f7171b007f700bb0007fff9900707ff990007000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00b7777b07fff70bb0007ff9b977000779b9007000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00bffffb07fff70bb0007f90bb0000000bb0907000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000bb99999bbbbbbb9bbbbbbbbbbbbbbb9bbbbb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+bbbbbbbbbbbbbbbbbbb7bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00000700000bb00000000000bb00000000000bb00000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00000700000b700000000000bb000000000077b0000000000070000000000000000000000000000000000000000000000000000000000000000000000000000
+b77000000000bb000000000777b000000000077b00000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00770077700bb000000007777b00000000070bb07000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00000077770bb00700000777bb07700070000bb00000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00007777770bb07770070000bb07700000000bb00000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00077777000bb07770000000bb00000000000bb00000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00077777000bb00700007700bb00000007000bb00000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00007770070bb00000077700bb00000000770bb00000000007b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00000000007bb00000007700bb00000000770bb00000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00000007000bb000000000007b00000000000bb00000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+b00000007000bb00000000000bb00000000000bb00000000000b0000000000000000000000000000000000000000000000000000000000000000000000000000
+bbbbbbbbbbbbbbbbbbbbb7bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
