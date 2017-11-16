@@ -83,31 +83,41 @@ local new_entities
 local entity_classes={
 	movable={
 		apply_move=function(self)
-			local prev_x,prev_y=self.x,self.y
-			self.x,self.y=self.state_data.move(self.state_data.easing(self.state_frames/self.state_end))
-			self.vx,self.vy=self.x-prev_x,self.y-prev_y
+			if self.state=="move" then
+				local prev_x,prev_y=self.x,self.y
+				local next_x,next_y=self.state_data.move(self.state_data.easing(self.state_frames/self.state_end))
+				self.vx,self.vy=next_x-prev_x,next_y-prev_y
+			end
+			return self.state=="move"
 		end,
 		on_enter_move_state=function(self)
 			local start_x,start_y=self.x,self.y
 			local data=self.state_data
-			local end_x=data.x+ternary(data.is_relative,start_x,0)
-			local end_y=data.y+ternary(data.is_relative,start_y,0)
+			local end_x,end_y=data.x,data.y
+			-- if type(end_x)=="function" then
+			-- 	end_x=end_x()
+			-- end
+			-- if type(end_y)=="function" then
+			-- 	end_y=end_y()
+			-- end
+			if data.relative then
+				end_x+=start_x
+				end_y+=start_y
+			end
 			local dx,dy=end_x-start_x,end_y-start_y
-			local dist=sqrt(dx*dx+dy*dy)
-			if not data.anchor_x1 or not data.anchor_y1 then
-				data.anchor_x1=dx/4
-				data.anchor_y1=dy/4
-			end
-			if not data.anchor_x2 or not data.anchor_y2 then
-				data.anchor_x2=-dx/4
-				data.anchor_y2=-dy/4
-			end
+			-- local dist=sqrt(dx*dx+dy*dy)
+			local anchor_x1=data.anchors[1] or dx/4
+			local anchor_y1=data.anchors[2] or dy/4
+			local anchor_x2=data.anchors[3] or -dx/4
+			local anchor_y2=data.anchors[4] or -dy/4
 			self.state_data={
+				final_x=end_x,
+				final_y=end_y,
 				easing=data.easing,
 				move=make_bezier(
 					start_x,start_y,
-					start_x+data.anchor_x1,start_y+data.anchor_y1,
-					end_x+data.anchor_x2,end_y+data.anchor_y2,
+					start_x+anchor_x1,start_y+anchor_y1,
+					end_x+anchor_x2,end_y+anchor_y2,
 					end_x,end_y)
 			}
 		end,
@@ -117,23 +127,38 @@ local entity_classes={
 			end
 			return self.state=="move"
 		end,
-		move=function(self,x,y,dur,is_relative,easing,anchor_x1,anchor_y1,anchor_x2,anchor_y2)
+		on_leave_state=function(self)
+			if self.state=="move" then
+				self.vx=0
+				self.vy=0
+				-- these can probably be removed:
+				self.x=self.state_data.final_x
+				self.y=self.state_data.final_y
+			end
+			return self.state=="move"
+		end,
+		move=function(self,x,y,dur,props)
+			-- is_relative,easing,anchor_x1,anchor_y1,anchor_x2,anchor_y2
 			-- x,y: where to move to
 			-- dur: the number of frames the move should take
-			-- is_relative: movement is relative if true, absolute if false
-			-- easing: an easing function for the movement
-			-- anchor_x1,anchor_y1: anchor relative to start point
-			-- anchor_x2,anchor_y2: anchor relative to end point
-			self:queue_state("move",dur,{
+			-- props: an object of the following optional properties:
+			--   relative: movement is relative to start location if true, absolute if false (default: absolute)
+			--   easing: an easing function for the movement (default: linear)
+			--   immediate: whether this move is queued or immediate (default: queued)
+			--   anchors: an array of {x1,y1,x2,y2} with x1,y1 relative to start and x2,y2 relative to the end
+			props=props or {}
+			local move_data={
 				x=x,
 				y=y,
-				is_relative=is_relative or false,
-				easing=easing or linear,
-				anchor_x1=anchor_x1,
-				anchor_y1=anchor_y1,
-				anchor_x2=anchor_x2,
-				anchor_y2=anchor_y2
-			})
+				relative=props.relative or false,
+				easing=props.easing or linear,
+				anchors=props.anchors or {}
+			}
+			if props.immediate then
+				self:set_state("move",dur,move_data)
+			else
+				self:queue_state("move",dur,move_data)
+			end
 		end
 	},
 	player={
@@ -384,6 +409,7 @@ local entity_classes={
 			end
 			sspr2(64+f*5,103,5,10,self.x-5,self.y-7)
 			sspr2(64+f*5,103,5,10,self.x,self.y-7,true,true)
+			-- pset(self.x,self.y,9)
 		end
 	},
 	comet_mark={
@@ -419,8 +445,17 @@ local entity_classes={
 		face=4,
 		wearing_top_hat=true,
 		update=function(self)
-			if self.state=="move" then
-				self:apply_move()
+			self:apply_move()
+			self:apply_velocity()
+		end,
+		move_to_player_col=function(self)
+			self:queue_state("move_to_player_col",0)
+		end,
+		on_enter_state=function(self)
+			if self.state=="move_to_player_col" then
+				self:move(10*player:col()-5,-20,30,{easing=ease_out,immediate=true,anchors={0,10,0,-10}})
+			else
+				self:super_on_enter_state()
 			end
 		end,
 		draw=function(self)
@@ -453,181 +488,69 @@ local entity_classes={
 		end
 	},
 	magic_mirror_hand={
+		-- is_right_hand
+		render_layer=7,
+		extends="movable",
 		pose=1,
-		draw=function(self)
-			palt(11,true)
-			if self.pose==1 then
-				sspr2(83,92,10,7,self.x-ternary(self.flipped,8,1),self.y-3,self.flipped)
-			elseif self.pose==2 then
-				sspr2(93,92,7,7,self.x-ternary(self.flipped,5,1),self.y-3,self.flipped)
-			elseif self.pose==3 then
-				sspr2(100,89,12,10,self.x-ternary(self.flipped,4,7),self.y-8,self.flipped)
-			elseif self.pose==4 then
-				sspr2(112,88,8,11,self.x-ternary(self.flipped,3,4),self.y-9,self.flipped)
-			elseif self.pose==5 then
-				sspr2(112+8,88,8,11,self.x-ternary(self.flipped,4,3),self.y-9,self.flipped)
-			end
-		end
-	},
-	cosmonas={
 		init=function(self)
-			self.head=spawn_entity("cosmonas_head",{x=40,y=-30})
-			self.left_hand=spawn_entity("cosmonas_hand",{x=self.x-20,y=self.y+20,dir=1})
-			self.right_hand=spawn_entity("cosmonas_hand",{x=self.x+20,y=self.y+20,dir=-1})
-
-			-- self.head:fire_laser()
-			-- self.head:move_to(40,-20,0)
-			-- self.head:fire_comets(10)
-			-- self.head:fire_comets(10)
-			-- self.head:fire_comets(10)
-			-- self.head:fire_comets(10)
-
-			-- self.left_hand:move_to(-10,4-8,10)
-			-- self.left_hand:translate(0,16,30)
-			-- self.left_hand:fire_hourglass()
-			-- self.left_hand:translate(0,16,30)
-			-- self.left_hand:fire_hourglass()
-
-			-- self.right_hand:move_to(90,4,10)
-			-- self.right_hand:fire_hourglass()
-			-- self.right_hand:translate(0,16,30)
-			-- self.right_hand:fire_hourglass()
-			-- self.right_hand:translate(0,16,30)
-			-- self.right_hand:fire_hourglass()
-		end
-	},
-	cosmonas_head={
-		vx=1,
-		hitbox_channel=1, -- player
-		laser_frames=0,
-		jaw_open=0,
-		marks=nil,
-		init=function(self)
-			self.future_state_data={}
+			self.dir=ternary(self.is_right_hand,-1,1)
 		end,
-		update=function(self)
-			if self.state=="move" then
-				self.vx=(self.state_data.x-self.x)/(1+self.state_end-self.state_frames)
-				self.vy=(self.state_data.y-self.y)/(1+self.state_end-self.state_frames)
-				self:apply_velocity()
-			elseif self.state=="open_jaw" and self.state_frames%5==0 then
-				self.jaw_open+=1
-			elseif self.state=="close_jaw" and self.state_frames%5==0 then
-				self.jaw_open-=1
-			elseif self.state=="charge_laser" and self.state_frames%2==0 then
-				local r=rnd_int(-170,-10)
-				spawn_entity("spark",{x=self.x+20*cos(r/360),y=self.y+20*sin(r/360),target_x=self.x,target_y=self.y,color=14})
-			elseif self.state=="spawn_comet_marks" and self.state_frames%2==0 then
-				local x=10*ternary(self.state_frames==0,player:col()-1,rnd_int(0,7))+5
-				local y=8*ternary(self.state_frames==0,player:row()-1,rnd_int(0,4))+4
-				add(self.marks,spawn_entity("comet_mark",{x=x,y=y,time_to_shoot=40}))
-				spawn_entity("flash",{x=self.x+ternary(self.state_frames%4==0,3,-3),y=self.y-8})
-			elseif self.state=="spawn_comets" and self.state_frames%1==0 then
-				self.marks[1+self.state_frames]:spawn_comet(self.x+ternary(self.state_frames%4==0,3,-3),self.y-8)
-				-- add(self.marks,spawn_entity("comet_mark",{x=10*rnd_int(0,7)+5,y=8*rnd_int(0,4)+4,time_to_shoot=40}))
-				-- spawn_entity("flash",{x=self.x+ternary(self.state_frames%8==0,3,-3),y=self.y-8})
-			end
+		move_to_row=function(self,row)
+			-- lasts 20 frames
+			self:queue_state("change_pose",0,3)
+			self:move(ternary(self.is_right_hand,90,-10),8*row-4,20,{easing=ease_in_out,anchors={-self.dir*10,-10,-self.dir*10,10}})
+			self:queue_state("change_pose",0,2)
 		end,
-		draw=function(self)
-			palt(11,true)
-			-- draw skull
-			sspr(0,68,7,19,self.x-6,self.y-16)
-			sspr(0,68,7,19,self.x,self.y-16,7,19,true)
-			-- draw jaw
-			sspr(2,87,5,6,self.x-4,self.y+self.jaw_open-3)
-			sspr(2,87,5,6,self.x,self.y+self.jaw_open-3,5,6,true)
-			-- draw laser
-			if self.state=="laser_preview" and self.state_frames%2==0 then
-				line(self.x,self.y+4,self.x,self.y+60,14)
-			elseif self.state=="laser" then
-				sspr(21,68,5,6,self.x-4,self.y+1)
-				sspr(21,68,5,6,self.x,self.y+1,5,6,true)
-				sspr(21,74,5,1,self.x-4,self.y+7,5,100)
-				sspr(21,74,5,1,self.x,self.y+7,5,100,true)
-			end
+		wait_for_card=function(self)
+			self:pause(23)
 		end,
-		is_hitting=function(self,entity)
-			return self.state=="laser" and entity:col()==self:col()
+		throw_card=function(self,row)
+			-- 6 frames before throw, 20 frames after
+			self:move_to_row(row)
+			self:pause(6)
+			self:queue_state("change_pose",0,1)
+			self:queue_state("throw_card",0)
+			self:pause(14)
+			self:queue_state("change_pose",0,2)
+			self:pause(6)
 		end,
-		on_enter_state=function(self)
-			if self.state=="translate" then
-				self.state="move"
-				self.state_data.x+=self.x
-				self.state_data.y+=self.y
-			elseif self.state=="spawn_comet_marks" then
-				self.marks={}
-			end
-		end,
-		move_to=function(self,x,y,dur)
-			self:queue_state("move",dur,{x=x,y=y})
-		end,
-		translate=function(self,dx,dy,dur)
-			self:queue_state("translate",dur,{x=dx,y=dy})
-		end,
-		fire_laser=function(self)
-			self:queue_state("open_jaw",14)
-			self:queue_state("charge_laser",16)
-			self:queue_state("pause",12)
-			self:queue_state("laser_preview",8)
-			self:queue_state("laser",35)
-			self:queue_state("laser_preview",2)
-			self:queue_state("pause",14)
-			self:queue_state("close_jaw",14)
-			self:queue_state("pause",12)
-		end,
-		fire_comets=function(self,num_comets)
-			self:queue_state("open_jaw",4)
-			self:queue_state("spawn_comet_marks",2*num_comets-2)
-			self:queue_state("pause",3)
-			self:queue_state("spawn_comets",1*num_comets-1)
-			self:queue_state("pause",3)
-			self:queue_state("close_jaw",4)
-			-- if scene_frame%2==0 and scene_frame>10 and scene_frame<50 then
-			-- 	spawn_entity("comet_mark",{x=5+10*rnd_int(0,7),y=4+8*rnd_int(0,4)})
-			-- end
-		end
-	},
-	cosmonas_hand={
-		update=function(self)
-			if self.state=="charge_up" and self.state_frames%2==0 then
-				local r=rnd_int(140,210)
-				spawn_entity("spark",{x=self.x-self.dir*20*cos(r/360),y=self.y+20*sin(r/360),target_x=self.x,target_y=self.y,color=10})
-			elseif self.state=="move" then
-				self.vx=(self.state_data.x-self.x)/(1+self.state_end-self.state_frames)
-				self.vy=(self.state_data.y-self.y)/(1+self.state_end-self.state_frames)
-				self:apply_velocity()
-			end
-		end,
-		draw=function(self)
-			palt(11,true)
-			if self.dir>0 then
-				sspr(7,68,14,17,self.x-8,self.y-8)
+		throw_cards=function(self)
+			if self.is_right_hand then
+				self:throw_card(1)
+				self:throw_card(3)
+				self:throw_card(5)
 			else
-				sspr(7,68,14,17,self.x-5,self.y-8,14,17,true)
+				self:wait_for_card()
+				self:throw_card(2)
+				self:throw_card(4)
 			end
 		end,
 		on_enter_state=function(self)
-			if self.state=="translate" then
-				self.state="move"
-				self.state_data.x+=self.x
-				self.state_data.y+=self.y
-			elseif self.state=="poof" then
-				spawn_entity("poof",{x=self.x+self.dir*4,y=self.y})
-			elseif self.state=="hourglass" then
-				spawn_entity("hourglass",{x=self.x+self.dir*4,y=self.y,vx=self.dir})
+			if self.state=="change_pose" then
+				self.pose=self.state_data
+			elseif self.state=="throw_card" then
+				spawn_entity("playing_card",{x=self.x+10*self.dir,y=self.y,vx=self.dir,is_red=(rnd()<0.5)})
 			end
+			self:super_on_enter_state()
 		end,
-		move_to=function(self,x,y,dur)
-			self:queue_state("move",dur,{x=x,y=y})
+		update=function(self)
+			self:apply_move()
+			self:apply_velocity()
 		end,
-		translate=function(self,dx,dy,dur)
-			self:queue_state("translate",dur,{x=dx,y=dy})
-		end,
-		fire_hourglass=function(self)
-			self:queue_state("charge_up",14)
-			self:queue_state("pause",10)
-			self:queue_state("poof",3)
-			self:queue_state("hourglass",3)
+		draw=function(self)
+			palt(11,true)
+			local r=self.is_right_hand
+			if self.pose==1 then
+				sspr2(83,92,10,7,self.x-ternary(r,8,1),self.y-3,r)
+			elseif self.pose==2 then
+				sspr2(93,92,7,7,self.x-ternary(r,5,1),self.y-3,r)
+			elseif self.pose==3 then
+				sspr2(100,89,12,10,self.x-ternary(r,4,7),self.y-8,r)
+			elseif self.pose==4 then
+				sspr2(112,88,8,11,self.x-ternary(r,3,4),self.y-9,r)
+			elseif self.pose==5 then
+				sspr2(112+8,88,8,11,self.x-ternary(r,4,3),self.y-9,r)
+			end
 		end
 	},
 	rainbow_spark={
@@ -796,28 +719,22 @@ end
 function init_game()
 	-- reset everything
 	entities,new_entities={},{}
-	-- create initial entities
 	player=spawn_entity("player",{x=10*3+5,y=8*2+4})
-	-- spawn_entity("player_reflection",{x=10*4+5,y=8*2+4})
-	-- spawn_entity("cosmonas",{x=40,y=-44})
+	spawn_entity("player_reflection",{x=10*4+5,y=8*2+4})
 	local mirror=spawn_entity("magic_mirror",{x=40,y=-44})
-	-- mirror:translate_bezier(50,0,-50,50,20,50,100,ease_in_out)
-	mirror:move(40,20,60,true,ease_out,-30,10,30,-10) -- is_relative,easing,anchor_x1,anchor_y1,anchor_x2,anchor_y2
-	spawn_entity("magic_mirror_hand",{x=20,y=-44})
-	spawn_entity("magic_mirror_hand",{x=60,y=-44,flipped=true})
+	local left_hand=spawn_entity("magic_mirror_hand",{x=20,y=-44})
+	local right_hand=spawn_entity("magic_mirror_hand",{x=60,y=-44,is_right_hand=true})
+
+	mirror:pause(30)
+	mirror:move_to_player_col()
+	left_hand:throw_cards()
+	right_hand:throw_cards()
+
 	spawn_entity("magic_tile",{x=10*3-5,y=8*4-4})
 	spawn_entity("magic_tile",{x=10*4-5,y=8*4-4})
 	spawn_entity("magic_tile",{x=10*5-5,y=8*4-4})
 	spawn_entity("magic_tile",{x=10*6-5,y=8*4-4})
 	spawn_entity("magic_tile",{x=10*7-5,y=8*4-4})
-	spawn_entity("playing_card",{x=10*6-5,y=8*2-4})
-	-- spawn_entity("heart",{x=10*5+5,y=8*3+4})
-	-- spawn_entity("poof",{x=10*7+5,y=8*3+4})
-	-- spawn_entity("hourglass",{x=10*8+5,y=8*0+4,vx=-1})
-	-- spawn_entity("hourglass",{x=10*8+5,y=8*2+4,vx=-1})
-	-- spawn_entity("hourglass",{x=10*8+5,y=8*4+4,vx=-1})
-	-- spawn_entity("hourglass",{x=10*-1+5,y=8*1+4})
-	-- spawn_entity("hourglass",{x=10*-1+5,y=8*3+4})
 	-- create tiles
 	create_tiles(levels[1])
 	-- immediately add new entities to the game
@@ -980,9 +897,17 @@ function spawn_entity(class_name,args,skip_init)
 				self:die()
 			end,
 			-- state methods
-			queue_state=function(self,state,state_end,state_data)
+			set_state=function(self,state,dur,state_data)
+				self.state_frames=0
+				self.state=state
+				self.state_end=dur or -1
+				self.state_data=state_data or nil
+				self:on_enter_state(self.state)
+				self:check_for_state_change()
+			end,
+			queue_state=function(self,state,dur,state_data)
 				add(self.future_state_data,state)
-				add(self.future_state_data,state_end or -1)
+				add(self.future_state_data,dur or -1)
 				add(self.future_state_data,state_data or false)
 			end,
 			queue_states=function(self,states)
@@ -991,22 +916,22 @@ function spawn_entity(class_name,args,skip_init)
 					self:queue_state(states[i],states[i+1],states[i+2])
 				end
 			end,
+			pause=function(self,dur)
+				self:queue_state("pause",dur)
+			end,
 			on_enter_state=noop,
+			on_leave_state=noop,
 			on_no_state=noop,
 			check_for_state_change=function(self)
-				if (self.state and self.state_end>=0 and self.state_frames>self.state_end) or (not self.state and #self.future_state_data>0) then
-					self.state=nil
+				if (self.state and self.state_end>=0 and self.state_frames>=self.state_end) or (not self.state and #self.future_state_data>0) then
+					self:on_leave_state(self.state)
 					self.state_frames=0
-					self.state_data=nil
+					self.state=nil
 					self.state_end=-1
+					self.state_data=nil
 					if #self.future_state_data>0 then
-						self.state=remove_first(self.future_state_data)
-						self.state_end=remove_first(self.future_state_data)
-						self.state_data=remove_first(self.future_state_data)
-						self:on_enter_state(self.state)
-						if self.state_end==0 then
-							self:check_for_state_change()
-						end
+						local f=self.future_state_data
+						self:set_state(remove_first(f),remove_first(f),remove_first(f))
 					else
 						self:on_no_state()
 					end
@@ -1093,7 +1018,7 @@ function linear(percent)
 end
 
 function ease_in(percent)
-	return percent^3
+	return percent^2
 end
 
 function ease_out(percent)
