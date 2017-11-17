@@ -107,7 +107,6 @@ local entity_classes={
 			-- props: an object of the following optional properties:
 			--   relative: movement is relative to start location if true, absolute if false (default: absolute)
 			--   easing: an easing function for the movement (default: linear)
-			--   immediate: whether this move is queued or immediate (default: queued)
 			--   anchors: an array of {x1,y1,x2,y2} with x1,y1 relative to start and x2,y2 relative to the end
 			props=props or {}
 			local start_x,start_y=self.x,self.y
@@ -371,6 +370,7 @@ local entity_classes={
 		end
 	},
 	playing_card={
+		frames_to_death=110,
 		hitbox_channel=1,
 		is_red=false,
 		draw=function(self)
@@ -421,16 +421,12 @@ local entity_classes={
 		face=4,
 		wearing_top_hat=true,
 		update=function(self)
-			self:update_schedule()
+			self:check_schedule()
 			self:apply_move()
 			self:apply_velocity()
 		end,
 		move_to_player_col=function(self,a,b,c,d)
 			self:move(10*player:col()-5,-20,30,{easing=ease_in,immediate=true,anchors={0,10,0,-10}})
-			debug_log("a "..a)
-			debug_log("b "..b)
-			debug_log("c "..c)
-			debug_log("d "..d)
 		end,
 		draw=function(self)
 			palt(3,true)
@@ -458,78 +454,76 @@ local entity_classes={
 		render_layer=7,
 		extends="movable",
 		held_mirror=nil,
+		held_mirror_dx=0,
+		held_mirror_dy=0,
 		pose=1,
 		init=function(self)
 			self.dir=ternary(self.is_right_hand,-1,1)
 		end,
+		change_pose=function(self,pose)
+			self.pose=pose
+		end,
 		move_to_row=function(self,row)
 			-- lasts 20 frames
-			self:queue_state("change_pose",0,3)
+			self:change_pose(3)
 			self:move(ternary(self.is_right_hand,90,-10),8*row-4,20,{easing=ease_in_out,anchors={-self.dir*10,-10,-self.dir*10,10}})
-			self:queue_state("change_pose",0,2)
-		end,
-		wait_for_card=function(self)
-			self:pause(23)
+			self:schedule(20,"change_pose",2)
 		end,
 		grab_mirror=function(self,mirror)
-			self:queue_state("change_pose",0,3)
-			self:queue_state("move_to_mirror_handle",0,mirror)
-			self:queue_state("hold_mirror",0,mirror)
-			self:queue_state("change_pose",0,2)
+			-- lasts 20 frames
+			local dx=-3*self.dir
+			local dy=12
+			self:change_pose(3)
+			self:move_to_mirror_handle(mirror,dx,dy)
+			self:schedule(20,"hold_mirror",mirror,dx,dy)
+			self:schedule(20,"change_pose",2)
+		end,
+		move_to_mirror_handle=function(self,mirror,dx,dy)
+			-- lasts 20 frames
+			self:move(mirror.x+dx,mirror.y+dy,20,{easing=ease_out,anchors={-10*self.dir,10,-25*self.dir,0}})
+		end,
+		hold_mirror=function(self,mirror,dx,dy)
+			self.held_mirror=mirror
+			self.held_mirror_dx=dx
+			self.held_mirror_dy=dy
 		end,
 		release_mirror=function(self,mirror)
-			self:queue_state("release_mirror",0)
-			self:queue_state("change_pose",0,3)
-			self:move(self.dir*-20,-5,30,{easing=ease_in,relative=true})
+			-- lasts 25 frames
+			self.held_mirror=nil
+			self:change_pose(3)
+			self:move(-15*self.dir,-3,25,{easing=ease_in,relative=true})
 		end,
-		throw_card=function(self,row)
-			-- 6 frames before throw, 20 frames after
+		throw_card=function(self)
+			-- lasts 14 frames
+			self:change_pose(1)
+			spawn_entity("playing_card",{x=self.x+10*self.dir,y=self.y,vx=self.dir,is_red=(rnd()<0.5)})
+			self:schedule(14,"change_pose",2)
+		end,
+		throw_card_at_row=function(self,row)
+			-- 26 frames before, 14 frames after (40 total)
 			self:move_to_row(row)
-			self:pause(6)
-			self:queue_state("change_pose",0,1)
-			self:queue_state("throw_card",0)
-			self:pause(14)
-			self:queue_state("change_pose",0,2)
-			self:pause(6)
+			self:schedule(26,"change_pose",1)
+			self:schedule(26,"throw_card")
 		end,
 		throw_cards=function(self)
+			-- lasts 168 frames?
+			local t=56
 			if self.is_right_hand then
-				self:throw_card(1)
-				self:throw_card(3)
-				self:throw_card(5)
+				self:throw_card_at_row(1)
+				self:schedule(t,"throw_card_at_row",3)
+				self:schedule(2*t,"throw_card_at_row",5)
 			else
-				self:wait_for_card()
-				self:throw_card(2)
-				self:throw_card(4)
+				self:schedule(0.5*t,"throw_card_at_row",2)
+				self:schedule(1.5*t,"throw_card_at_row",4)
 			end
-		end,
-		on_enter_state=function(self)
-			if self.state=="change_pose" then
-				self.pose=self.state_data
-			elseif self.state=="throw_card" then
-				spawn_entity("playing_card",{x=self.x+10*self.dir,y=self.y,vx=self.dir,is_red=(rnd()<0.5)})
-			elseif self.state=="move_to_mirror_handle" then
-				self:move(self.state_data.x-3*self.dir,self.state_data.y+12,20,{easing=ease_out,immediate=true,anchors={-10*self.dir,10,-25*self.dir,0}})
-			elseif self.state=="hold_mirror" then
-				self.held_mirror=self.state_data
-			elseif self.state=="release_mirror" then
-				self.held_mirror=nil
-				self.vx=0
-				self.vy=0
-			else
-				self:super_on_enter_state()
-			end
-		end,
-		on_leave_state=function(self)
-			self:super_on_leave_state()
-			-- end
 		end,
 		update=function(self)
+			self:check_schedule()
 			self:apply_move()
 			self:apply_velocity()
 			if self.held_mirror then
-				self.x=self.held_mirror.x-3*self.dir
-				self.y=self.held_mirror.y+12
+				self.x=self.held_mirror.x+self.held_mirror_dx
+				self.y=self.held_mirror.y+self.held_mirror_dy
 				self.vx=self.held_mirror.vx
 				self.vy=self.held_mirror.vy
 			end
@@ -721,25 +715,16 @@ function init_game()
 	spawn_entity("player_reflection",{x=10*4+5,y=8*2+4})
 	local mirror=spawn_entity("magic_mirror",{x=40,y=-44})
 
-	-- local left_hand=spawn_entity("magic_mirror_hand",{x=20,y=-44})
-	-- local right_hand=spawn_entity("magic_mirror_hand",{x=60,y=-44,is_right_hand=true})
+	local left_hand=spawn_entity("magic_mirror_hand",{x=20,y=-44})
+	local right_hand=spawn_entity("magic_mirror_hand",{x=60,y=-44,is_right_hand=true})
 
-	-- left_hand:pause(5)
 	-- left_hand:grab_mirror(mirror)
-	-- left_hand:pause(20)
-	-- left_hand:release_mirror()
-	-- left_hand:throw_cards()
-
 	-- right_hand:grab_mirror(mirror)
-	-- right_hand:pause(20)
-	-- right_hand:release_mirror()
-	-- right_hand:throw_cards()
-
-	-- mirror:pause(30)
-	-- mirror:move_to_player_col()
-	mirror:schedule(20,"move_to_player_col",{5,2,10,1})
-	-- left_hand:throw_cards()
-	-- right_hand:throw_cards()
+	-- left_hand:schedule(70,"release_mirror")
+	-- right_hand:schedule(70,"release_mirror")
+	left_hand:throw_cards()
+	right_hand:throw_cards()
+	mirror:schedule(30,"move_to_player_col")
 
 	spawn_entity("magic_tile",{x=10*3-5,y=8*4-4})
 	spawn_entity("magic_tile",{x=10*4-5,y=8*4-4})
@@ -758,6 +743,11 @@ function update_game()
 	-- update entities
 	local entity
 	for entity in all(entities) do
+		-- update the entity's schedule
+		local i
+		for i=1,#entity.scheduled do
+			entity.scheduled[i][1]-=1
+		end
 		-- call the entity's update function
 		entity:update()
 		-- do some default update stuff
@@ -855,9 +845,11 @@ function spawn_entity(class_name,args,skip_init)
 	local entity
 	if super_class_name then
 		entity=spawn_entity(super_class_name,args,true)
+		entity.class_name=class_name
 	else
 		-- create default entity
 		entity={
+			class_name=class_name,
 			is_alive=true,
 			frames_alive=0,
 			frames_to_death=0,
@@ -880,7 +872,7 @@ function spawn_entity(class_name,args,skip_init)
 			add_to_game=noop,
 			init=noop,
 			update=function(self)
-				self:update_schedule()
+				self:check_schedule()
 				self:apply_velocity()
 			end,
 			draw=noop,
@@ -910,28 +902,33 @@ function spawn_entity(class_name,args,skip_init)
 				self:die()
 			end,
 			-- schedule methods
-			schedule=function(self,time,fn,args)
-				add(self.scheduled,{time+time,fn,args})
+			schedule=function(self,time,fn,...)
+				local args={...}
+				add(self.scheduled,{time,fn,args})
 			end,
-			update_schedule=function(self)
+			check_schedule=function(self)
 				local i
 				local num_deleted=0
 				local list=self.scheduled
+				local to_call={}
 				for i=1,#list do
 					local item=list[i]
-					local fn=item[2]
-					local args=item[3]
 					if item[1]<=0 then
-						if type(fn)=="function" then
-							fn(self,unpack(args))
-						else
-							self[fn](self,unpack(args))
-						end
+						add(to_call,item[2])
+						add(to_call,item[3] or {})
 						list[i]=nil
 						num_deleted+=1
 					else
-						item[1]-=1
 						list[i-num_deleted],list[i]=item,nil
+					end
+				end
+				for i=1,#to_call,2 do
+					local fn=to_call[i]
+					local args=to_call[i+1]
+					if type(fn)=="function" then
+						fn(self,unpack(args))
+					else
+						self[fn](self,unpack(args))
 					end
 				end
 			end,
@@ -1035,8 +1032,13 @@ function ease_in_out(percent)
 end
 
 -- helper functions
-function debug_log(log)
-	add(debug_logs,log)
+function debug_log(log,print_instead)
+	if print_instead then
+		color(8)
+		print(log)
+	else
+		add(debug_logs,log)
+	end
 end
 
 function unpack(list,from,to)
