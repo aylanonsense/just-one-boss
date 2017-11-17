@@ -76,6 +76,9 @@ local levels={
 	"xxxxxxxx"
 }
 
+-- global debug vars
+local debug_logs={}
+
 -- global entity vars
 local player
 local entities
@@ -83,59 +86,19 @@ local new_entities
 local entity_classes={
 	movable={
 		apply_move=function(self)
-			if self.state=="move" then
+			if self.movement then
+				self.movement.frames+=1
 				local prev_x,prev_y=self.x,self.y
-				local next_x,next_y=self.state_data.move(self.state_data.easing(self.state_frames/self.state_end))
+				local next_x,next_y=self.movement.fn(self.movement.easing(self.movement.frames/self.movement.duration))
 				self.vx,self.vy=next_x-prev_x,next_y-prev_y
+				if self.movement.frames>=self.movement.duration then
+					self.x=self.movement.final_x
+					self.y=self.movement.final_y
+					self.vx=0
+					self.vy=0
+					self.movement=nil
+				end
 			end
-			return self.state=="move"
-		end,
-		on_enter_move_state=function(self)
-			local start_x,start_y=self.x,self.y
-			local data=self.state_data
-			local end_x,end_y=data.x,data.y
-			-- if type(end_x)=="function" then
-			-- 	end_x=end_x()
-			-- end
-			-- if type(end_y)=="function" then
-			-- 	end_y=end_y()
-			-- end
-			if data.relative then
-				end_x+=start_x
-				end_y+=start_y
-			end
-			local dx,dy=end_x-start_x,end_y-start_y
-			-- local dist=sqrt(dx*dx+dy*dy)
-			local anchor_x1=data.anchors[1] or dx/4
-			local anchor_y1=data.anchors[2] or dy/4
-			local anchor_x2=data.anchors[3] or -dx/4
-			local anchor_y2=data.anchors[4] or -dy/4
-			self.state_data={
-				final_x=end_x,
-				final_y=end_y,
-				easing=data.easing,
-				move=make_bezier(
-					start_x,start_y,
-					start_x+anchor_x1,start_y+anchor_y1,
-					end_x+anchor_x2,end_y+anchor_y2,
-					end_x,end_y)
-			}
-		end,
-		on_enter_state=function(self)
-			if self.state=="move" then
-				self:on_enter_move_state()
-			end
-			return self.state=="move"
-		end,
-		on_leave_state=function(self)
-			if self.state=="move" then
-				self.vx=0
-				self.vy=0
-				-- these can probably be removed:
-				self.x=self.state_data.final_x
-				self.y=self.state_data.final_y
-			end
-			return self.state=="move"
 		end,
 		move=function(self,x,y,dur,props)
 			-- is_relative,easing,anchor_x1,anchor_y1,anchor_x2,anchor_y2
@@ -147,18 +110,30 @@ local entity_classes={
 			--   immediate: whether this move is queued or immediate (default: queued)
 			--   anchors: an array of {x1,y1,x2,y2} with x1,y1 relative to start and x2,y2 relative to the end
 			props=props or {}
-			local move_data={
-				x=x,
-				y=y,
-				relative=props.relative or false,
-				easing=props.easing or linear,
-				anchors=props.anchors or {}
-			}
-			if props.immediate then
-				self:set_state("move",dur,move_data)
-			else
-				self:queue_state("move",dur,move_data)
+			local start_x,start_y=self.x,self.y
+			local end_x,end_y=x,y
+			if props.relative then
+				end_x+=start_x
+				end_y+=start_y
 			end
+			local dx,dy=end_x-start_x,end_y-start_y
+			local anchors=props.anchors or {}
+			local anchor_x1=anchors[1] or dx/4
+			local anchor_y1=anchors[2] or dy/4
+			local anchor_x2=anchors[3] or -dx/4
+			local anchor_y2=anchors[4] or -dy/4
+			self.movement={
+				frames=0,
+				duration=dur,
+				final_x=end_x,
+				final_y=end_y,
+				easing=props.easing or linear,
+				fn=make_bezier(
+					start_x,start_y,
+					start_x+anchor_x1,start_y+anchor_y1,
+					end_x+anchor_x2,end_y+anchor_y2,
+					end_x,end_y)
+			}
 		end
 	},
 	player={
@@ -446,18 +421,16 @@ local entity_classes={
 		face=4,
 		wearing_top_hat=true,
 		update=function(self)
+			self:update_schedule()
 			self:apply_move()
 			self:apply_velocity()
 		end,
-		move_to_player_col=function(self)
-			self:queue_state("move_to_player_col",0)
-		end,
-		on_enter_state=function(self)
-			if self.state=="move_to_player_col" then
-				self:move(10*player:col()-5,-20,30,{easing=ease_in,immediate=true,anchors={0,10,0,-10}})
-			else
-				self:super_on_enter_state()
-			end
+		move_to_player_col=function(self,a,b,c,d)
+			self:move(10*player:col()-5,-20,30,{easing=ease_in,immediate=true,anchors={0,10,0,-10}})
+			debug_log("a "..a)
+			debug_log("b "..b)
+			debug_log("c "..c)
+			debug_log("d "..d)
 		end,
 		draw=function(self)
 			palt(3,true)
@@ -747,22 +720,24 @@ function init_game()
 	player=spawn_entity("player",{x=10*3+5,y=8*2+4})
 	spawn_entity("player_reflection",{x=10*4+5,y=8*2+4})
 	local mirror=spawn_entity("magic_mirror",{x=40,y=-44})
-	local left_hand=spawn_entity("magic_mirror_hand",{x=20,y=-44})
-	local right_hand=spawn_entity("magic_mirror_hand",{x=60,y=-44,is_right_hand=true})
+
+	-- local left_hand=spawn_entity("magic_mirror_hand",{x=20,y=-44})
+	-- local right_hand=spawn_entity("magic_mirror_hand",{x=60,y=-44,is_right_hand=true})
 
 	-- left_hand:pause(5)
 	-- left_hand:grab_mirror(mirror)
 	-- left_hand:pause(20)
 	-- left_hand:release_mirror()
-	left_hand:throw_cards()
+	-- left_hand:throw_cards()
 
 	-- right_hand:grab_mirror(mirror)
 	-- right_hand:pause(20)
 	-- right_hand:release_mirror()
-	right_hand:throw_cards()
+	-- right_hand:throw_cards()
 
-	mirror:pause(30)
-	mirror:move_to_player_col()
+	-- mirror:pause(30)
+	-- mirror:move_to_player_col()
+	mirror:schedule(20,"move_to_player_col",{5,2,10,1})
 	-- left_hand:throw_cards()
 	-- right_hand:throw_cards()
 
@@ -783,9 +758,6 @@ function update_game()
 	-- update entities
 	local entity
 	for entity in all(entities) do
-		-- stateful entities will transition between various states
-		increment_counter_prop(entity,"state_frames")
-		entity:check_for_state_change()
 		-- call the entity's update function
 		entity:update()
 		-- do some default update stuff
@@ -865,6 +837,14 @@ function draw_game()
 	-- 		rectfill(3*j,3*i,3*j+2,3*i+2,color_ramps[i][j])
 	-- 	end
 	-- end
+	-- draw debug text
+	if #debug_logs>0 then
+		camera()
+		local i
+		for i=1,#debug_logs do
+			print(debug_logs[i],10,10*i+120-10*#debug_logs,8)
+		end
+	end
 end
 
 
@@ -887,12 +867,8 @@ function spawn_entity(class_name,args,skip_init)
 			hitbox_channel=0,
 			hurtbox_channel=0,
 			invincibility_frames=0,
-			-- state props
-			state=nil,
-			future_state_data={},
-			state_frames=0,
-			state_end=-1,
-			state_data=nil,
+			-- schedule props
+			scheduled={},
 			-- spatial props
 			x=0,
 			y=0,
@@ -904,6 +880,7 @@ function spawn_entity(class_name,args,skip_init)
 			add_to_game=noop,
 			init=noop,
 			update=function(self)
+				self:update_schedule()
 				self:apply_velocity()
 			end,
 			draw=noop,
@@ -932,46 +909,34 @@ function spawn_entity(class_name,args,skip_init)
 			on_hurt=function(self)
 				self:die()
 			end,
-			-- state methods
-			set_state=function(self,state,dur,state_data)
-				self.state_frames=0
-				self.state=state
-				self.state_end=dur or -1
-				self.state_data=state_data or nil
-				self:on_enter_state(self.state)
-				self:check_for_state_change()
+			-- schedule methods
+			schedule=function(self,time,fn,args)
+				add(self.scheduled,{time+time,fn,args})
 			end,
-			queue_state=function(self,state,dur,state_data)
-				add(self.future_state_data,state)
-				add(self.future_state_data,dur or -1)
-				add(self.future_state_data,state_data or false)
-			end,
-			queue_states=function(self,states)
+			update_schedule=function(self)
 				local i
-				for i=1,#states,3 do
-					self:queue_state(states[i],states[i+1],states[i+2])
-				end
-			end,
-			pause=function(self,dur)
-				self:queue_state("pause",dur)
-			end,
-			on_enter_state=noop,
-			on_leave_state=noop,
-			on_no_state=noop,
-			check_for_state_change=function(self)
-				if (self.state and self.state_end>=0 and self.state_frames>=self.state_end) or (not self.state and #self.future_state_data>0) then
-					self:on_leave_state(self.state)
-					self.state_frames=0
-					self.state=nil
-					self.state_end=-1
-					self.state_data=nil
-					if #self.future_state_data>0 then
-						local f=self.future_state_data
-						self:set_state(remove_first(f),remove_first(f),remove_first(f))
+				local num_deleted=0
+				local list=self.scheduled
+				for i=1,#list do
+					local item=list[i]
+					local fn=item[2]
+					local args=item[3]
+					if item[1]<=0 then
+						if type(fn)=="function" then
+							fn(self,unpack(args))
+						else
+							self[fn](self,unpack(args))
+						end
+						list[i]=nil
+						num_deleted+=1
 					else
-						self:on_no_state()
+						item[1]-=1
+						list[i-num_deleted],list[i]=item,nil
 					end
 				end
+			end,
+			clear_schedule=function(self)
+				self.scheduled={}
 			end
 		}
 	end
@@ -1070,6 +1035,18 @@ function ease_in_out(percent)
 end
 
 -- helper functions
+function debug_log(log)
+	add(debug_logs,log)
+end
+
+function unpack(list,from,to)
+	from=from or 1
+	to=to or #list
+	if from<=to then
+		return list[from],unpack(list,from+1,to)
+	end
+end
+
 function make_bezier(x0,y0,x1,y1,x2,y2,x3,y3)
 	return function(t)
 		return (1-t)^3*x0+3*(1-t)^2*t*x1+3*(1-t)*t^2*x2+t^3*x3,(1-t)^3*y0+3*(1-t)^2*t*y1+3*(1-t)*t^2*y2+t^3*y3
@@ -1150,7 +1127,7 @@ end
 -- increment a counter, wrapping to 20000 if it risks overflowing
 function increment_counter(n)
 	if n>32000 then
-		return 20000
+		return n-12000
 	end
 	return n+1
 end
