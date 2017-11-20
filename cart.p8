@@ -81,6 +81,9 @@ local debug_logs={}
 
 -- global entity vars
 local player
+local player_health
+local boss
+local boss_health
 local entities
 local new_entities
 local entity_classes={
@@ -228,6 +231,7 @@ local entity_classes={
 			-- self:cancel_move(self:col(),self:row())
 			self.invincibility_frames=60
 			self.stun_frames=19
+			self.player_health:lose_heart()
 		end,
 		draw=function(self)
 			palt(3,true)
@@ -285,6 +289,81 @@ local entity_classes={
 			-- rect(left,top,right,bottom,8)
 		end
 	},
+	player_health={
+		hearts=3,
+		anim=nil,
+		anim_frames=0,
+		x=63,
+		y=122,
+		render_layer=10,
+		update_priority=0,
+		gain_heart=function(self)
+			if self.hearts<4 then
+				self.hearts+=1
+				self.anim="gain"
+				self.anim_frames=10
+			end
+		end,
+		lose_heart=function(self)
+			if self.hearts>0 then
+				self.hearts-=1
+				self.anim="lose"
+				self.anim_frames=20
+			end
+			return self.hearts<=0
+		end,
+		update=function(self)
+			if decrement_counter_prop(self,"anim_frames") then
+				self.anim=nil
+			end
+		end,
+		draw=function(self)
+			palt(3,true)
+			local i
+			for i=1,4 do
+				local sprite
+				sspr(0,30,9,7,self.x+8*i-24,self.y-3)
+				if self.anim=="gain" and i==self.hearts then
+					sprite=mid(1,5-flr(self.anim_frames/2),3)
+				elseif self.anim=="lose" and i==self.hearts+1 then
+					sprite=6
+				elseif i<=self.hearts then
+					sprite=4
+				else
+					sprite=0
+				end
+				if sprite!=6 or self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
+					sspr(9*sprite,30,9,7,self.x+8*i-24,self.y-3)
+				end
+			end
+		end
+	},
+	boss_health={
+		health=0,
+		visible_health=0,
+		glow_frames=0,
+		x=63,
+		y=5,
+		render_layer=10,
+		update_priority=0,
+		gain_health=function(self,health)
+			self.health=mid(0,self.health+health,60)
+			self.glow_frames=5+(self.health-self.visible_health)
+		end,
+		update=function(self)
+			if self.visible_health<self.health then
+				self.visible_health+=1
+			end
+			decrement_counter_prop(self,"glow_frames")
+		end,
+		draw=function(self)
+			if self.glow_frames>0 then
+				pal(5,rainbow[1+flr(scene_frame/4)%#rainbow])
+			end
+			rect(self.x-30,self.y-3,self.x+30,self.y+3,5)
+			rectfill(self.x-30,self.y-3,self.x+mid(-30,-31+self.visible_health,29),self.y+3,5)
+		end
+	},
 	magic_tile={
 		hurtbox_channel=2,
 		render_layer=3,
@@ -294,7 +373,7 @@ local entity_classes={
 			rect(self.x-4,self.y-3,self.x+4,self.y+3,7)
 			rect(self.x-2,self.y-1,self.x+2,self.y+1,7)
 		end,
-		on_death=function(self)
+		on_hurt=function(self)
 			freeze_frames=max(freeze_frames,1)
 			screen_shake_frames=max(screen_shake_frames,2)
 			spawn_entity("magic_tile_fade",{x=self.x,y=self.y})
@@ -312,6 +391,8 @@ local entity_classes={
 					frames_to_death=rnd_int(13,19)
 				})
 			end
+			boss_health:gain_health(10)
+			self:die()
 		end
 	},
 	magic_tile_fade={
@@ -347,12 +428,23 @@ local entity_classes={
 		end,
 	},
 	heart={
+		hurtbox_channel=2,
+		frames_to_death=150,
+		update=function(self)
+		end,
 		draw=function(self)
-			palt(3,true)
-			if (self.frames_alive+4)%30<20 then
-				pal(14,8)
+			local f=self.frames_to_death
+			if f>30 or f%4>1 then
+				palt(3,true)
+				if (self.frames_alive+4)%30<16 then
+					pal(14,8)
+				end
+				sspr(ternary(self.frames_alive%30<20,36,45),30,9,7,self.x-4,self.y-5)
 			end
-			sspr(ternary(self.frames_alive%30<20,114,121),0,7,6,self.x-3,self.y-5)
+		end,
+		on_hurt=function(self)
+			player_health:gain_heart()
+			self:die()
 		end
 	},
 	hourglass={
@@ -903,6 +995,12 @@ function init_game()
 	-- reset everything
 	entities,new_entities={},{}
 	player=spawn_entity("player",{x=10*3+5,y=8*2+4})
+	player=spawn_entity("heart",{x=10*4+5,y=8*3+4})
+	player=spawn_entity("magic_tile",{x=10*2+5,y=8*4+4})
+	player=spawn_entity("magic_tile",{x=10*3+5,y=8*4+4})
+	player=spawn_entity("magic_tile",{x=10*4+5,y=8*4+4})
+	player_health=spawn_entity("player_health")
+	boss_health=spawn_entity("boss_health")
 	-- create tiles
 	create_tiles(levels[1])
 	-- immediately add new entities to the game
@@ -961,44 +1059,21 @@ function renders_on_top_of(entity1,entity2)
 end
 
 function draw_game()
-	camera(0,-11)
-	-- draw curtains
-	color(2)
-	line(1,0,1,83)
-	line(7,0,7,57)
-	line(18,0,18,25)
-	line(22,0,22,9)
-	line(125,0,125,83)
-	line(119,0,119,57)
-	line(108,0,108,25)
-	line(104,0,104,9)
-	-- draw stars
-	color(1)
-	pset(29,19)
-	pset(88,7)
-	pset(18,41)
-	circ(18,41,1)
-	pset(44,3)
-	pset(102,43)
-	pset(24,45)
-	pset(112,62)
-	circ(112,62,1)
-	pset(11,70)
-	pset(5,108)
-	pset(120,91)
-	pset(110,119)
 	-- shake the camera
 	local shake_x=0
 	if freeze_frames<=0 and screen_shake_frames>0 then
 		shake_x+=mid(1,screen_shake_frames/3,2)*(2*(scene_frame%2)-1)
 	end
-	camera(5*num_cols-63+shake_x,4*num_rows-85)
-	local r,c
+	-- draw the background
+	camera(shake_x,-11)
+	draw_background()
 	-- draw grid
+	camera(5*num_cols-63+shake_x,4*num_rows-85)
 	line(16,-1,64,-1,1)
 	line(16,41,64,41,1)
 	line(16,49,64,49,1)
 	palt(3,true)
+	local r,c
 	for c=1,num_cols do
 		for r=1,num_rows do
 			if tiles[c][r] then
@@ -1015,36 +1090,38 @@ function draw_game()
 	sspr2(58,111,16,12,0,40)
 	sspr2(58,111,16,12,65,40,true)
 	sspr2(60,123,20,5,30,46)
-	-- draw each entity
-	pal()
-	foreach(entities,function(entity)
-		entity:draw()
+	-- draw each entity with render_layer<10
+	local i=1
+	while i<=#entities and entities[i].render_layer<10 do
 		pal()
-	end)
+		entities[i]:draw()
+		i+=1
+	end
+	pal()
 	-- draw top ui
 	palt(3,true)
-	camera()
+	camera(shake_x)
 	rectfill(0,0,127,10,0)
-	rect(34,2,92,8,5)
 	sspr(117,6,11,7,6,2)
 	print("4",8,3,0)
 	color(1)
-	print("17",103,3)
-	print("03",113,3)
-	pset(111,4)
-	pset(111,6)
+	print("25700",101,3,1)
 	-- draw bottom ui
-	camera(0,-118)
-	rectfill(0,0,127,10,0)
-	sspr(112,6,5,5,7,2)
-	sspr(109,6,3,3,14,3)
-	print("3",19,2,1)
-	palt(3,true)
-	local i
-	for i=1,4 do
-		sspr(107+7,0,7,6,40+8*i,2)
+	rectfill(0,0+118,127,128,0)
+	sspr(112,6,5,5,7,120)
+	sspr(109,6,3,3,14,121)
+	print("3",19,120,1)
+	print("17",103,120)
+	print("03",113,120)
+	pset(111,121)
+	pset(111,123)
+	-- draw ui entities (render_layer>=10)
+	while i<=#entities do
+		pal()
+		entities[i]:draw()
+		i+=1
 	end
-	print("25700",101,2,1)
+	pal()
 	-- cover up extra line
 	camera()
 	line(127,0,127,127,0)
@@ -1072,11 +1149,39 @@ function draw_game()
 	-- draw debug logs
 	if #debug_logs>0 then
 		camera()
-		local i
-		for i=1,#debug_logs do
-			print(debug_logs[i],10,10*i+120-10*#debug_logs,8)
+		local j
+		for j=1,#debug_logs do
+			print(debug_logs[j],10,10*j+120-10*#debug_logs,8)
 		end
 	end
+end
+
+function draw_background()
+	-- draw curtains
+	color(2)
+	line(1,0,1,83)
+	line(7,0,7,57)
+	line(18,0,18,25)
+	line(22,0,22,9)
+	line(125,0,125,83)
+	line(119,0,119,57)
+	line(108,0,108,25)
+	line(104,0,104,9)
+	-- draw stars
+	color(1)
+	pset(29,19)
+	pset(88,7)
+	pset(18,41)
+	circ(18,41,1)
+	pset(44,3)
+	pset(102,43)
+	pset(24,45)
+	pset(112,62)
+	circ(112,62,1)
+	pset(11,70)
+	pset(5,108)
+	pset(120,91)
+	pset(110,119)
 end
 
 
@@ -1439,12 +1544,12 @@ scenes={
 
 
 __gfx__
-3ccccc33cc33333333333333cccc333333ccccc33333933cc3333333333333330000000000000000000000000000000000000000000355355338838833388833
-cccccccccccccccc0330000cccccc3000ccccccc30008dccccc3300000000003000000000000000000000000000000000000000000050050058888ee838888e3
-cccc1c1cccc1111c1c3000ccc11c13000cccc1c130000cccccc33000c11cccc3000000000000000000000000000000000000000000050000058888ee838888e3
-cdcc1c1cddd1111c1c30cddcc11c13000dccc1c13000dcc1c1cc30ccc11111cc0000000000000000000000000000000000000000000350005338888833888883
-cccccccccccccccccc300cccccccc3000ccccccc300ddcc1c1cc3dccddcccccc0000000000000000000000000000000000000000000305050330888033088803
-ddcccccddcdddd00033000ddccddc3000ddcccdc3000ddccccc3dddccccccdd30000000000000000000000000000000000000000000333533333383333338333
+3ccccc33cc33333333333333cccc333333ccccc33333933cc3333333333333330000000000000000000000000000000000000000000000000000000000000000
+cccccccccccccccc0330000cccccc3000ccccccc30008dccccc33000000000030000000000000000000000000000000000000000000000000000000000000000
+cccc1c1cccc1111c1c3000ccc11c13000cccc1c130000cccccc33000c11cccc30000000000000000000000000000000000000000000000000000000000000000
+cdcc1c1cddd1111c1c30cddcc11c13000dccc1c13000dcc1c1cc30ccc11111cc0000000000000000000000000000000000000000000000000000000000000000
+cccccccccccccccccc300cccccccc3000ccccccc300ddcc1c1cc3dccddcccccc0000000000000000000000000000000000000000000000000000000000000000
+ddcccccddcdddd00033000ddccddc3000ddcccdc3000ddccccc3dddccccccdd30000000000000000000000000000000000000000000000000000000000000000
 ddddddddddd0000003300ddddddd3300dddddddd30000ddcccd3dddddddd0003000000000000000000000000000000000000000000000131ddddd31111111113
 3d333d33d33333333333333333d33333333333d3333333d33398333333d33333000000000000000000000000000000000000000000000313d0d0d11111111111
 3ccccc33333333c33333333ccccc333333ccccc33333ccccc333333333333333000000000000000000000000000000000000000000000131d0d0d11111101011
@@ -1469,13 +1574,13 @@ ccccccc30000ddccc33000ddccccc3000cdccccc380ccccccc0930dcc1c1cdd3000ccccccc300000
 dcccccd300000ddd033000dcccccc3000dcccccc300cc1c1cc0330ccc1c1ccd30dcccccc00300000000000000000000000000000000000000000000000000000
 ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc300ddddddd0300000000000000000000000000000000000000000000000000000
 3d333d33333333d33333333d3333333333d333333333ccccc3333333dddddd33333d333d33300000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+33333333333333333383333333883333333833333333333333333338833333300000000000000000000000000000000000000000000000000000000000000000
+30550550330550550338880888330880880330880880330088800388880588300000000000000000000000000000000000000000000000000000000000000000
+35005005335005005338888ee8338888ee8338888ee83308888e03888050ee800000000000000000000000000000000000000000000000000000000000000000
+35000005335888885338888ee8338888ee8338888ee83308888e03388808ee800000000000000000000000000000000000000000000000000000000000000000
+30500050330588850330888880330888880330888880330888880330800088300000000000000000000000000000000000000000000000000000000000000000
+30050500330058500330888880330088800330088800330088800330050880300000000000000000000000000000000000000000000000000000000000000000
+33335333333335333338338338338338338333338333333338333333335833300000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
