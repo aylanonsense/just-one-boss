@@ -26,113 +26,27 @@ symbols:
 	left:	‹
 	right:	‘
 
-token count: 7674 tokens
-	boss: 2338 tokens
-	player: 862 tokens
-	other entities: 1998 tokens
-	helper methods: 704 tokens
-	draw_game: 497 tokens
-	spawn_entity: 406 tokens
-	color ramps: 135 tokens
-	easing functions: 57 tokens
-	other boilerplate: 677 tokens
-
-thenables:
-	function basic_action(self,a,b,c)
-		self:move(...)
-		return promise(12)
-	end
-	function composed_action(self,a,b,c)
-		return promise(5)
-			.then("basic_action",a,b,c)
-			.then("basic_action",a,b,c)
-	end
-	function composed_action_2(self,a,b,c)
-		return self:basic_action(a,b,c)
-			.then("basic_action",a,b,c)
-	end
-	function composed_action_3(self,a,b,c)
-		return self:basic_action(a,b,c)
-			.then(function()
-				self:move(...)
-				return 12
-			end)
-	end
-	function async_composed_action(self,a,b,c)
-		return self:basic_action(a,b,c)
-			.then_async(5,"basic_action",a,b,c)
-			.then("basic_action",a,bc)
-	end
-	function final_action(self)
-		return then("composed_action",a,b,c)
-			.then("")
-	end
+starting symbols: 6838
+after a bit of work: 6206
 ]]
 
 -- useful noop function
 function noop() end
 
 -- global constants
-local num_cols=8
-local num_rows=5
-local color_ramps={
-	{7,13,5,1,0,0,0,0},
-	{7,14,8,2,1,0,0,0},
-	{7,6,11,3,5,1,0,0},
-	{7,15,9,4,2,1,0,0},
-	{7,6,13,5,1,0,0,0},
-	{7,7,7,6,13,5,1,0},
-	{7,7,7,7,6,13,1,0},
-	{7,7,14,8,2,1,0,0},
-	{7,15,10,9,4,2,1,0},
-	{7,7,15,10,9,4,1,0},
-	{7,7,6,11,3,5,1,0},
-	{7,7,6,12,13,5,1,0},
-	{7,7,6,13,5,1,0,0},
-	{7,7,15,14,8,2,1,0},
-	{7,7,7,15,9,4,1,0}
-}
-color_ramps[0]={7,5,1,0,0,0,0,0}
-local mirrored_directions={
-	left="right",
-	right="left",
-	up="up",
-	down="down"
-}
-local rainbow={14,8,9,10,11,12}
+local color_ramp_str="751000007d5100007e82100076b351007f94210076d510007776d51077776d1077e821007fa9421077fa9410776b3510776cd510776d510077fe8210777f9410"
+local color_ramps={}
+local rainbow_color
 
 -- global scene vars
 local scenes
 local scene
 local scene_frame
-local freeze_frames
-local screen_shake_frames
-local next_scene
-local transition_frames_left
+local freeze_frames=0
+local screen_shake_frames=0
 
 -- global promise vars
-local promises
-
--- global config vars
-local training_mode=false
-local speed_mode=true
-
--- global input vars
-local buttons
-local button_presses
-
--- global tile vars
-local tiles
-local levels={
-	"xxxxxxxx"..
-	"xxxxxxxx"..
-	"xxxxxxxx"..
-	"xxxxxxxx"..
-	"xxxxxxxx"
-}
-
--- global debug vars
-local debug_logs={}
+local promises={}
 
 -- global entity vars
 local player
@@ -259,13 +173,13 @@ local entity_classes={
 				self.next_move_dir=nil
 			end
 			-- try moving
-			if button_presses[0] then
+			if btnp(0) then
 				self:queue_move("left")
-			elseif button_presses[1] then
+			elseif btnp(1) then
 				self:queue_move("right")
-			elseif button_presses[2] then
+			elseif btnp(2) then
 				self:queue_move("up")
-			elseif button_presses[3] then
+			elseif btnp(3) then
 				self:queue_move("down")
 			end
 			-- actually move
@@ -467,7 +381,7 @@ local entity_classes={
 					boss.visible=true
 				end
 				if self.health>=60 then
---					boss:schedule(55,"intro")
+					-- boss:schedule(55,"intro")
 				end
 			end
 		end,
@@ -487,7 +401,7 @@ local entity_classes={
 		draw=function(self)
 			if self.visible then
 				if self.rainbow_frames>0 then
-					pal(5,rainbow[1+flr(scene_frame/4)%#rainbow])
+					pal2(5,16)
 				end
 				rect(self.x-30,self.y-3,self.x+30,self.y+3,5)
 				rectfill(self.x-30,self.y-3,self.x+mid(-30,-31+self.visible_health,29),self.y+3,5)
@@ -504,7 +418,7 @@ local entity_classes={
 		end,
 		on_death=function(self)
 			screen_shake_frames=max(screen_shake_frames,1)
-			spawn_entity("magic_tile",{x=self.x,y=self.y})
+			spawn_entity("magic_tile",self.x,self.y)
 			make_sparks(self.x,self.y,0,-3,4,"rainbow",0.3)
 		end
 	},
@@ -513,7 +427,7 @@ local entity_classes={
 		render_layer=3,
 		draw=function(self)
 			local fade=mid(1,flr(self.frames_alive/2),4)
-			local color=color_ramps[rainbow[1+flr(scene_frame/4)%#rainbow]][fade]
+			local color=color_ramps[rainbow_color][fade]
 			local background_color=color_ramps[1][fade]
 			rectfill(self.x-4,self.y-3,self.x+4,self.y+3,background_color)
 			rect(self.x-4,self.y-3,self.x+4,self.y+3,color)
@@ -522,7 +436,7 @@ local entity_classes={
 		on_hurt=function(self)
 			freeze_frames=max(freeze_frames,1)
 			screen_shake_frames=max(screen_shake_frames,3)
-			spawn_entity("magic_tile_fade",{x=self.x,y=self.y})
+			spawn_entity("magic_tile_fade",self.x,self.y)
 			make_sparks(self.x,self.y,0,-10,30,"rainbow",1)
 			boss_health:gain_health(10)
 			if boss_health.health<60 then
@@ -548,6 +462,12 @@ local entity_classes={
 			self:copy_player()
 		end,
 		copy_player=function(self)
+			local mirrored_directions={
+				left="right",
+				right="left",
+				up="up",
+				down="down"
+			}
 			self.x=80-player.x
 			self.y=player.y
 			self.facing=mirrored_directions[player.facing]
@@ -583,20 +503,6 @@ local entity_classes={
 			self:die()
 		end
 	},
-	hourglass={
-		hitbox_channel=1, --player
-		frames_to_death=89,
-		vx=1,
-		draw=function(self)
-			palt(3,true)
-			local f=flr(self.frames_alive/2.5)%4
-			if self.vx>0 then
-				f=(4-f)%4
-			end
-			sspr(7+9*f,85,9,9,self.x-4,self.y-ternary(f==0,7,9))
-			-- pset(self.x,self.y,8)
-		end
-	},
 	playing_card={
 		frames_to_death=110,
 		hitbox_channel=1,
@@ -616,34 +522,6 @@ local entity_classes={
 			-- pset(self.x,self.y,9)
 		end
 	},
-	comet_mark={
-		comet=nil,
-		render_layer=3,
-		update=function(self)
-			if self.comet and not self.comet.is_alive then
-				self:die()
-			end
-		end,
-		draw=function(self)
-			palt(3,true)
-			pal(7,color_ramps[14][2+flr(self.frames_alive/4)%3])
-			sspr(43,87,9,7,self.x-4,self.y-3)
-		end,
-		spawn_comet=function(self,x,y)
-			self.comet=spawn_entity("comet",{color=rnd_from_list({7,14,15}),x=x,y=y,target_x=self.x,target_y=self.y,vx=rnd_int(-5,5),vy=rnd_int(-7,-1)})
-		end
-	},
-	flash={
-		color=14,
-		frames_to_death=6,
-		render_layer=10,
-		draw=function(self)
-			palt(3,true)
-			pal2(7,color_ramps[self.color][3+flr(self.frames_alive/2)])
-			sspr(5*flr(self.frames_alive/2),108,5,9,self.x-2,self.y-4)
-			-- pset(self.x,self.y,8)
-		end
-	},
 	flower_patch={
 		render_layer=4,
 		update=function(self)
@@ -654,9 +532,7 @@ local entity_classes={
 				self.frames_to_death=35
 				local i
 				for i=1,2 do
-					spawn_entity("flower_petal",{
-						x=self.x,
-						y=self.y-5,
+					spawn_entity("flower_petal",self.x,self.y-5,{
 						vx=i-2,
 						vy=rnd_num(-10,-1),
 						color=self.color,
@@ -710,8 +586,8 @@ local entity_classes={
 		hover_dir=nil,
 		actions={},
 		init=function(self)
-			self.left_hand=spawn_entity("magic_mirror_hand",{x=self.x-18,y=self.y+5})
-			self.right_hand=spawn_entity("magic_mirror_hand",{x=self.x+18,y=self.y+5,is_right_hand=true})
+			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,self.y+5)
+			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,self.y+5,{is_right_hand=true})
 		end,
 		update=function(self)
 			decrement_counter_prop(self,"rainbow_frames")
@@ -735,9 +611,7 @@ local entity_classes={
 			if self.charge_frames>0 then
 				decrement_counter_prop(self,"charge_frames")
 				local angle=rnd_int(1,360)
-				spawn_entity("charge_particle",{
-					x=self.x+20*cos(angle/360),
-					y=self.y+20*sin(angle/360),
+				spawn_entity("charge_particle",self.x+20*cos(angle/360),self.y+20*sin(angle/360),{
 					target_x=self.x,
 					target_y=self.y,
 					color=7
@@ -858,63 +732,62 @@ local entity_classes={
 			return 12
 		end,
 		poof=function(self,dx,dy)
-			spawn_entity("poof",{x=self.x+(dx or 0),y=self.y+(dy or 0)})
+			spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
 		end,
 		change_expression=function(self,expression)
 			self.expression=expression
 		end,
-		--
-		shoot_lasers=function(self)
--- 			local hover_frames=25
--- 			local laser_frames=65
--- 			self:change_expression(5)
--- --			self:schedule(6,"move_to_player_col")
--- --			self:schedule(16,"shoot_laser")
--- 			local f=16+laser_frames
--- 			local i
--- 			for i=1,2 do
--- --				self:schedule(f,"hover",hover_frames)
--- 				f+=hover_frames
--- --				self:schedule(f,"shoot_laser")
--- 				f+=laser_frames
--- 			end
-		end,
-		hover=function(self,frames,dir)
+		-- shoot_lasers=function(self)
+			-- local hover_frames=25
+			-- local laser_frames=65
+			-- self:change_expression(5)
+			-- self:schedule(6,"move_to_player_col")
+			-- self:schedule(16,"shoot_laser")
+			-- local f=16+laser_frames
+			-- local i
+			-- for i=1,2 do
+			-- 	self:schedule(f,"hover",hover_frames)
+			-- 	f+=hover_frames
+			-- 	self:schedule(f,"shoot_laser")
+			-- 	f+=laser_frames
+			-- end
+		-- end,
+		-- hover=function(self,frames,dir)
 			-- self.hover_frames=frames
 			-- self.hover_dir=dir or self.hover_dir or 1
-		end,
-		shoot_laser=function(self)
+		-- end,
+		-- shoot_laser=function(self)
 			-- local charge_frames=14
 			-- local preview_frames=12
 			-- local laser_frames=25
 			-- self:change_expression(4)
 			-- self:charge_laser(charge_frames)
---			self:schedule(charge_frames,"preview_laser",preview_frames+laser_frames+4)
---			self:schedule(charge_frames+preview_frames,"fire_laser",laser_frames)
---			self:schedule(charge_frames+preview_frames,"change_expression",0)
---			self:schedule(charge_frames+preview_frames+laser_frames,"change_expression",4)
-		end,
-		charge_laser=function(self,frames)
+			-- self:schedule(charge_frames,"preview_laser",preview_frames+laser_frames+4)
+			-- self:schedule(charge_frames+preview_frames,"fire_laser",laser_frames)
+			-- self:schedule(charge_frames+preview_frames,"change_expression",0)
+			-- self:schedule(charge_frames+preview_frames+laser_frames,"change_expression",4)
+		-- end,
+		-- charge_laser=function(self,frames)
 			-- self.charge_frames=frames
-		end,
-		preview_laser=function(self,frames)
+		-- end,
+		-- preview_laser=function(self,frames)
 			-- self.laser_preview_frames=frames
-		end,
-		fire_laser=function(self,frames)
+		-- end,
+		-- fire_laser=function(self,frames)
 			-- self.laser_frames=frames
-		end,
-		reset_state=function(self,held_hand)
+		-- end,
+		-- reset_state=function(self,held_hand)
 			-- if not self.left_hand.held_mirror or not self.right_hand.held_mirror then
 			-- 	self:set_held_hands(held_hand or "left")
 			-- end
 			-- if self.expression!= 1 then
---				self:schedule(5,"change_expression",5)
---				self:schedule(16,"change_expression",1)
+				-- self:schedule(5,"change_expression",5)
+				-- self:schedule(16,"change_expression",1)
 			-- end
---			self:schedule(15,"move_to_home")
---			self:schedule(45,"set_held_hands",held_hand)
-		end,
-		move_to_home=function(self)
+			-- self:schedule(15,"move_to_home")
+			-- self:schedule(45,"set_held_hands",held_hand)
+		-- end,
+		-- move_to_home=function(self)
 			-- lasts 30 frames
 			-- self:move(40,-28,30,{easing=ease_in,relative=false})
 			-- if not self.left_hand.held_mirror then
@@ -923,8 +796,8 @@ local entity_classes={
 			-- if not self.right_hand.held_mirror then
 			-- 	self.right_hand:move_to_home(40,-28)
 			-- end
-		end,
-		set_held_hands=function(self,held_hand)
+		-- end,
+		-- set_held_hands=function(self,held_hand)
 			-- lasts 10 frames
 			-- if self.left_hand.held_mirror and held_hand!="left" then
 			-- 	self.left_hand:release_mirror()
@@ -936,21 +809,21 @@ local entity_classes={
 			-- elseif not self.right_hand.held_mirror and held_hand=="right" then
 			-- 	self.right_hand:grab_mirror(self)
 			-- end
-		end,
-		conjure_flowers=function(self)
+		-- end,
+		-- conjure_flowers=function(self)
 			-- local increment=3
 			-- local time_to_bloom=70
 			-- self.left_hand:change_pose(1)
 			-- self.left_hand:move(self.x-15,self.y,20,{easing=ease_in})
 			-- self.right_hand:change_pose(1)
 			-- self.right_hand:move(self.x+15,self.y,20,{easing=ease_in})
---			self:schedule(10,"change_expression",2)
---			self:schedule(30,"spawn_flowers",increment,time_to_bloom)
---			self:schedule(29+time_to_bloom,"change_expression",3)
---			self.left_hand:schedule(29+time_to_bloom,"change_pose",4)
---			self.right_hand:schedule(29+time_to_bloom,"change_pose",4)
-		end,
-		spawn_flowers=function(self,increment,time_to_bloom)
+			-- self:schedule(10,"change_expression",2)
+			-- self:schedule(30,"spawn_flowers",increment,time_to_bloom)
+			-- self:schedule(29+time_to_bloom,"change_expression",3)
+			-- self.left_hand:schedule(29+time_to_bloom,"change_pose",4)
+			-- self.right_hand:schedule(29+time_to_bloom,"change_pose",4)
+		-- end,
+		-- spawn_flowers=function(self,increment,time_to_bloom)
 			-- local restricted_col=rnd_int(0,3)
 			-- local restricted_row=rnd_int(0,4)
 			-- local flowers={}
@@ -974,21 +847,20 @@ local entity_classes={
 			-- 	flowers[i].hidden_frames=i
 			-- 	spawn_entity("flower_patch",flowers[i])
 			-- end
-		end,
-		move_to_player_col=function(self,a,b,c,d)
+		-- end,
+		-- move_to_player_col=function(self,a,b,c,d)
 			-- 20 frames
 			-- self:move(10*player:col()-5,-20,20,{easing=ease_in,immediate=true})
-		end,
+		-- end,
 		reset_colors=function(self)
 			pal()
 			palt(3,true)
 		end,
 		apply_rainbow_colors=function(self)
 			if self.rainbow_frames>0 then
-				local c=rainbow[1+flr(scene_frame/4)%#rainbow]
 				local i
 				for i=1,15 do
-					pal(i,c)
+					pal(i,rainbow_color)
 				end
 			end
 		end
@@ -1089,10 +961,10 @@ local entity_classes={
 			self.pose=pose
 		end,
 		poof=function(self,dx,dy)
-			spawn_entity("poof",{x=self.x+(dx or 0),y=self.y+(dy or 0)})
+			spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
 		end,
 		spawn_card=function(self)
-			spawn_entity("playing_card",{x=self.x+10*self.dir,y=self.y,vx=self.dir,is_red=(rnd()<0.5)})
+			spawn_entity("playing_card",self.x+10*self.dir,self.y,{vx=self.dir,is_red=(rnd()<0.5)})
 		end,
 		--
 		-- move_to_home=function(self,x,y)
@@ -1128,7 +1000,7 @@ local entity_classes={
 			-- end
 			-- color(color_ramps[c][fade])
 			if self.color=="rainbow" then
-				color(rainbow[1+flr(scene_frame/4)%#rainbow])
+				color(rainbow_color)
 			else
 				local fade=mid(1,self.frames_alive+1,4)
 				if self.frames_to_death<=5 then
@@ -1161,89 +1033,36 @@ local entity_classes={
 			palt(3,true)
 			sspr(16*flr(self.frames_alive/3),37,16,14,self.x-8,self.y-8)
 		end
-	},
-	comet={
-		render_layer=9,
-		color=14,
-		frames_to_death=30,
-		init=function(self)
-			self.prev_x=self.x
-			self.prev_y=self.y
-		end,
-		update=function(self)
-			self.prev_x=self.x
-			self.prev_y=self.y
-			local dx=self.target_x-self.x
-			local dy=self.target_y-self.y
-			local dist=sqrt(dx*dx+dy*dy)
-			if dist>0 then
-				local acc=mid(0.2,self.frames_alive/2-2,4)
-				self.vx+=acc*dx/dist
-				self.vy+=acc*dy/dist
-			end
-			self.vx*=0.8
-			self.vy*=0.8
-			self:apply_velocity()
-			if self.y>self.target_y-5 and self.frames_to_death>2 then
-				self.x=self.target_x
-				self.y=self.target_y
-				self.frames_to_death=2
-			end
-		end,
-		draw=function(self)
-			line(self.x,self.y,self.prev_x,self.prev_y,self.color)
-		end,
-		on_death=function(self)
-			spawn_entity("comet_explosion",{x=self.target_x,y=self.target_y})
-		end
-	},
-	comet_explosion={
-		hitbox_channel=1, -- player
-		render_layer=4,
-		frames_to_death=10,
-		update=function(self)
-			if self.frames_alive>=2 then
-				self.hitbox_channel=0
-			end
-		end,
-		draw=function(self)
-			sspr(40+16*flr(self.frames_alive/2),48,16,16,self.x-7,self.y-8)
-		end
 	}
 }
 
 
 -- primary pico-8 functions (_init, _update, _draw)
 function _init()
-	promises={}
-	freeze_frames=0
-	transition_frames_left=0
-	screen_shake_frames=0
-	buttons={}
-	button_presses={}
-	init_scene("game")
-end
-
-local skip_frames=0
-function _update()
-	skip_frames=increment_counter(skip_frames)
-	if skip_frames%1>0 then return end
-	-- keep track of inputs (because btnp repeats presses)
-	local i
-	for i=0,5 do
-		button_presses[i]=btn(i) and not buttons[i]
-		buttons[i]=btn(i)
-	end
-	-- transition between scenes
-	if transition_frames_left>0 then
-		transition_frames_left=decrement_counter(transition_frames_left)
-		if transition_frames_left==30 then
-			init_scene(next_scene)
-			next_scene=nil
+	-- unpack the color ramps from hex to actual ints
+	local i,j
+	for i=0,15 do
+		color_ramps[i]={}
+		for j=1,8 do
+			add(color_ramps[i],("0x"..(sub(color_ramp_str,8*i+j,8*i+j)))+0)
 		end
 	end
+	-- set up the scenes now that the functions are defined
+	scenes={
+		game={init_game,update_game,draw_game}
+	}
+	-- run the "game" scene
+	scene,scene_frame=scenes.game,0
+	scene[1]()
+end
+
+-- local skip_frames=0
+function _update()
+	-- skip_frames=increment_counter(skip_frames)
+	-- if skip_frames%1>0 then return end
 	-- update promises
-	for i=1,#promises do
+	local num_promises,i=#promises
+	for i=1,num_promises do
 		promises[i]:update()
 	end
 	filter_list(promises,function(promise)
@@ -1255,62 +1074,38 @@ function _update()
 	else
 		screen_shake_frames=decrement_counter(screen_shake_frames)
 		scene_frame=increment_counter(scene_frame)
-		scenes[scene][2]()
+		scene[2]()
 	end
 end
 
 function _draw()
-	-- reset the canvas
-	camera()
-	rectfill(0,0,127,127,0)
+	-- clear the screen
+	cls(0)
 	-- call the draw function of the current scene
-	scenes[scene][3]()
-	-- draw the scene transition
-	camera()
-	if transition_frames_left>0 then
-		local t,x,y=transition_frames_left
-		if t<30 then
-			t+=30
-		end
-		for y=0,128,6 do
-			for x=0,128,6 do
-				local size=mid(0,50-t+y/10-x/40,4)
-				if transition_frames_left<30 then
-					size=4-size
-				end
-				if size>0 then
-					circfill(x,y,size,0)
-				end
-			end
-		end
-	end
+	scene[3]()
 end
 
 
 -- game functions
 function init_game()
+	calc_rainbow_color()
 	-- reset everything
 	entities,new_entities={},{}
-	player=spawn_entity("player",{x=10*3+5,y=8*2+4})
+	-- create starting entities
+	player=spawn_entity("player",35,20)
 	player_health=spawn_entity("player_health")
 	boss=spawn_entity("magic_mirror")
 	boss_health=spawn_entity("boss_health")
-	if speed_mode then
-		boss.visible=true
-		boss_health.visible=true
-		boss:intro():and_then("decide_next_action")
-	elseif training_mode then
-		spawn_entity("instructions")
-	else
-		spawn_magic_tile(50)
-	end
-	-- create tiles
-	create_tiles(levels[1])
+	-- get to the good part
+	boss.visible=true
+	boss_health.visible=true
+	boss:intro():and_then("decide_next_action")
 	-- immediately add new entities to the game
 	add_new_entities()
 end
 
 function update_game()
+	calc_rainbow_color()
 	-- sort entities for updating
 	sort_list(entities,updates_before)
 	-- update entities
@@ -1326,34 +1121,27 @@ function update_game()
 		end
 	end
 	-- check for hits
-	local i,j,entity,entity2
+	local i
 	for i=1,#entities do
-		entity=entities[i]
+		local entity,j=entities[i]
 		for j=1,#entities do
-			entity2=entities[j]
-			if i!=j and band(entity.hitbox_channel,entity2.hurtbox_channel)>0 and entity:is_hitting(entity2) and entity2.invincibility_frames<=0 and entity:on_hit(entity2)!=false then
-				entity2:on_hurt(entity)
+			local entity2=entities[j]
+			if i!=j and band(entity.hitbox_channel,entity2.hurtbox_channel)>0 and entity:is_hitting(entity2) then
+				entity:on_hit(entity2)
+				if entity2.invincibility_frames<=0 then
+					entity2:on_hurt(entity)
+				end
 			end
 		end
 	end
 	-- add new entities to the game
 	add_new_entities()
 	-- remove dead entities from the game
-	remove_deceased_entities(entities)
+	filter_list(entities,function(entity)
+		return entity.is_alive
+	end)
 	-- sort entities for rendering
 	sort_list(entities,renders_on_top_of)
-end
-
-function updates_before(entity1,entity2)
-	return entity1.update_priority>entity2.update_priority
-end
-
-function renders_on_top_of(entity1,entity2)
-	if entity1.render_layer==entity2.render_layer then
-		return entity1:row()>entity2:row()
-	else
-		return entity1.render_layer>entity2.render_layer
-	end
 end
 
 function draw_game()
@@ -1366,21 +1154,15 @@ function draw_game()
 	camera(shake_x,-11)
 	draw_background()
 	-- draw grid
-	camera(5*num_cols-63+shake_x,4*num_rows-85)
+	camera(shake_x-23,-65)
 	line(16,-1,64,-1,1)
 	line(16,41,64,41,1)
 	line(16,49,64,49,1)
 	palt(3,true)
 	local r,c
-	for c=1,num_cols do
-		for r=1,num_rows do
-			if tiles[c][r] then
-				sspr2(74,114,6,9,10*c-10,8*r-8)
-				sspr2(74,114,6,9,10*c-5,8*r-8,true)
-				if (c+r)%2==0 then
-					pset(10*c-5,8*r-4,5)
-				end
-			end
+	for c=0,7 do
+		for r=0,4 do
+			sspr2((c+r)%2*11,51,11,9,10*c,8*r)
 		end
 	end
 	sspr2(58,111,16,2,0,-1,false,true)
@@ -1427,14 +1209,6 @@ function draw_game()
 	-- cover up extra line
 	camera()
 	line(127,0,127,127,0)
-	-- draw color ramps
-	-- camera()
-	-- local i,j
-	-- for i=0,#color_ramps do
-	-- 	for j=1,#color_ramps[i] do
-	-- 		rectfill(3*j,3*i,3*j+2,3*i+2,color_ramps[i][j])
-	-- 	end
-	-- end
 	-- draw guidelines
 	-- camera()
 	-- color(3)
@@ -1448,14 +1222,6 @@ function draw_game()
 	-- rect(47,119,79,125) -- bottom middle ui
 	-- line(63,0,63,127) -- mid line
 	-- line(127,0,127,127) -- unused right line
-	-- draw debug logs
-	if #debug_logs>0 then
-		camera()
-		local j
-		for j=1,#debug_logs do
-			print(debug_logs[j],10,10*j+120-10*#debug_logs,8)
-		end
-	end
 end
 
 function draw_background()
@@ -1488,20 +1254,19 @@ end
 
 
 -- entity functions
-function spawn_entity(class_name,args,skip_init)
+function spawn_entity(class_name,x,y,args,skip_init)
+	local k,v,entity
 	local super_class_name=entity_classes[class_name].extends
-	local k,v
-	local entity
 	if super_class_name then
-		entity=spawn_entity(super_class_name,args,true)
-		entity.class_name=class_name
+		entity=spawn_entity(super_class_name,x,y,args,true)
 	else
 		-- create default entity
 		entity={
-			class_name=class_name,
+			-- lifetime props
 			is_alive=true,
 			frames_alive=0,
 			frames_to_death=0,
+			-- ordering props
 			render_layer=5,
 			update_priority=5,
 			-- hit props
@@ -1509,35 +1274,31 @@ function spawn_entity(class_name,args,skip_init)
 			hurtbox_channel=0,
 			invincibility_frames=0,
 			-- spatial props
-			x=0,
-			y=0,
-			z=0,
+			x=x or 0,
+			y=y or 0,
 			vx=0,
 			vy=0,
-			vz=0,
 			-- entity methods
 			add_to_game=noop,
 			init=noop,
 			update=function(self)
 				self:apply_velocity()
 			end,
+			apply_velocity=function(self)
+				self.x+=self.vx
+				self.y+=self.vy
+			end,
 			draw=noop,
+			die=function(self)
+				self:on_death()
+				self.is_alive=false
+			end,
 			on_death=noop,
-			on_collide=noop,
 			col=function(self)
 				return 1+flr(self.x/10)
 			end,
 			row=function(self)
 				return 1+flr(self.y/8)
-			end,
-			die=function(self)
-				self:on_death()
-				self.is_alive=false
-			end,
-			apply_velocity=function(self)
-				self.x+=self.vx
-				self.y+=self.vy
-				self.z+=self.vz
 			end,
 			-- hit methods
 			is_hitting=function(self,entity)
@@ -1547,6 +1308,7 @@ function spawn_entity(class_name,args,skip_init)
 			on_hurt=function(self)
 				self:die()
 			end,
+			-- promise methods
 			promise=function(self,ctx,...)
 				local p
 				if type(ctx)=="table" then
@@ -1572,7 +1334,7 @@ function spawn_entity(class_name,args,skip_init)
 	end
 	if not skip_init then
 		-- initialize it
-		entity:init(args or {})
+		entity:init(args)
 		-- add it to the list of entities-to-be-added
 		add(new_entities,entity)
 	end
@@ -1588,69 +1350,21 @@ function add_new_entities()
 	new_entities={}
 end
 
-function remove_deceased_entities(list)
-	filter_list(list,function(entity)
-		return entity.is_alive
-	end)
+function updates_before(a,b)
+	return a.update_priority>b.update_priority
+end
+
+function renders_on_top_of(a,b)
+	if a.render_layer==b.render_layer then
+		return a:row()>b:row()
+	end
+	return a.render_layer>b.render_layer
 end
 
 
 -- tile functions
-function create_tiles(level_def)
-	tiles={}
-	local c,r
-	for c=1,num_cols do
-		tiles[c]={}
-		for r=1,num_rows do
-			local i=c+(r-1)*num_cols
-			local s=char_at(level_def,i)
-			if s==" " then
-				tiles[c][r]=false
-			else
-				tiles[c][r]={}
-			end
-		end
-	end
-end
-
 function tile_exists(col,row)
-	return tiles[col] and tiles[col][row]
-end
-
-
--- scene functions
-function init_scene(s)
-	scene,scene_frame=s,0
-	scenes[scene][1]()
-end
-
-function transition_to_scene(s)
-	if next_scene!=s then
-		next_scene=s
-		transition_frames_left=60
-	end
-end
-
-
--- easing functions
-function linear(percent)
-	return percent
-end
-
-function ease_in(percent)
-	return 1-ease_out(1-percent)
-end
-
-function ease_out(percent)
-	return percent^2
-end
-
-function ease_in_out(percent)
-	if percent<0.5 then
-		return ease_out(2*percent)/2
-	else
-		return 0.5+ease_in(2*(percent-0.5))/2
-	end
+	return mid(1,col,8)==col and mid(1,row,5)==row
 end
 
 -- example make_promise calls:
@@ -1746,13 +1460,8 @@ function all_promises(ctx,...)
 	return promise
 end
 
--- helper functions
 function spawn_magic_tile(frames_to_death)
-	spawn_entity("magic_tile_spawn",{
-		x=10*rnd_int(1,8)-5,
-		y=8*rnd_int(1,5)-4,
-		frames_to_death=frames_to_death	
-	})
+	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{frames_to_death=frames_to_death})
 end
 
 function make_sparks(x,y,vx,vy,num_sparks,color,speed_percent)
@@ -1762,9 +1471,7 @@ function make_sparks(x,y,vx,vy,num_sparks,color,speed_percent)
 		local speed=speed_percent*rnd_int(7,15)
 		local cos_angle=cos(angle/360)
 		local sin_angle=sin(angle/360)
-		spawn_entity("spark",{
-			x=x+5*cos_angle,
-			y=y+5*sin_angle,
+		spawn_entity("spark",x+5*cos_angle,y+5*sin_angle,{
 			vx=speed*cos_angle+vx,
 			vy=speed*sin_angle+vy,
 			color=color,
@@ -1773,36 +1480,10 @@ function make_sparks(x,y,vx,vy,num_sparks,color,speed_percent)
 	end
 end
 
-function debug_log(log,print_instead)
-	if print_instead then
-		color(8)
-		print(log)
-	else
-		add(debug_logs,log)
-	end
-end
-
-function unpack(list,from,to)
-	from=from or 1
-	to=to or #list
-	if from<=to then
-		return list[from],unpack(list,from+1,to)
-	end
-end
-
 function make_bezier(x0,y0,x1,y1,x2,y2,x3,y3)
 	return function(t)
 		return (1-t)^3*x0+3*(1-t)^2*t*x1+3*(1-t)*t^2*x2+t^3*x3,(1-t)^3*y0+3*(1-t)^2*t*y1+3*(1-t)*t^2*y2+t^3*y3
 	end
-end
-
-function pal2(c1,c2)
-	pal(c1,c2)
-	palt(c1,c2==0)
-end
-
-function sspr2(x,y,width,height,x2,y2,flip_horizontal,flip_vertical)
-	sspr(x,y,width,height,x2,y2,width,height,flip_horizontal,flip_vertical)
 end
 
 function dir_to_vector(dir,magnitude)
@@ -1820,55 +1501,63 @@ function dir_to_vector(dir,magnitude)
 	end
 end
 
-function ceil(n)
-	return -flr(-n)
+-- drawing functions
+function calc_rainbow_color()
+	rainbow_color=8+flr(scene_frame/4)%6
+	if rainbow_color==13 then
+		rainbow_color=14
+	end
+	color_ramps[16]=color_ramps[rainbow_color]
 end
 
+function get_color(c,fade) -- fade between 3 (lightest) and -3 (darkest)
+	return color_ramps[c][4-fade]
+end
+
+function pal2(c1,c2,fade)
+	local c3=get_color(c2,fade or 0)
+	pal(c1,c3)
+	palt(c1,c3==0)
+end
+
+function sspr2(x,y,width,height,x2,y2,flip_horizontal,flip_vertical)
+	sspr(x,y,width,height,x2,y2,width,height,flip_horizontal,flip_vertical)
+end
+
+-- easing functions
+function linear(percent)
+	return percent
+end
+
+function ease_in(percent)
+	return 1-ease_out(1-percent)
+end
+
+function ease_out(percent)
+	return percent^2
+end
+
+function ease_in_out(percent)
+	return ternary(percent<0.5,ease_out(2*percent)/2,0.5+ease_in(2*percent-1)/2)
+end
+
+-- helper functions
 -- if condition is true return the second argument, otherwise the third
 function ternary(condition,if_true,if_false)
 	return condition and if_true or if_false
 end
 
--- gets the character in string s at position n
-function char_at(s,n)
-	return sub(s,n,n)
-end
-
--- removes and returns the first element of a list, operates in-place
-function remove_first(list)
-	local last=nil
-	for i=#list,1,-1 do
-		list[i],last=last,list[i]
+-- unpacks an array so it can be passed as function arguments
+function unpack(list,from,to)
+	from,to=from or 1,to or #list
+	if from<=to then
+		return list[from],unpack(list,from+1,to)
 	end
-	return last
-end
-
--- gets the first position of character c in string s
-function char_index(s,c)
-	local i
-	for i=1,#s do
-		if char_at(s,i)==c then
-			return i
-		end
-	end
-end
-
-function rnd_from_list(list)
-	return list[rnd_int(1,#list)]
 end
 
 -- generates a random integer between min_val and max_val, inclusive
 function rnd_int(min_val,max_val)
 	return flr(min_val+rnd(1+max_val-min_val))
-end
-
-function rnd_num(min_val,max_val)
-	return min_val+rnd(max_val-min_val)
-end
-
--- if n is below min, wrap to max. if n is above max, wrap to min
-function wrap(min_val,n,max_val)
-	return ternary(n<min_val,max_val,ternary(n>max_val,min_val,n))
 end
 
 -- increment a counter, wrapping to 20000 if it risks overflowing
@@ -1910,6 +1599,7 @@ function sort_list(list,func)
 	end
 end
 
+-- shuffles a list randomly
 function shuffle_list(list)
 	local i
 	for i=1,#list do
@@ -1930,11 +1620,6 @@ function filter_list(list,func)
 		end
 	end
 end
-
--- set up the scenes now that the functions are defined
-scenes={
-	game={init_game,update_game,draw_game}
-}
 
 
 __gfx__
@@ -1989,15 +1674,15 @@ ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc330dc11c11cd30000
 30007777000000037777700000000773777000000000070330000000000000030000000000000000000000000000000000000000000000000000000000000000
 30007770000000037777700770000773307070770000000330000000000000030000000000000000000000000000000000000000000000000000000000000000
 33333333333333333773333773333333333333333333333333333333333333330000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+51111111115511111111150000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11555555511115555555110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+15511111551155111115510000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+15111511151151115111510000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+15115151151151155511510000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+15111511151151115111510000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+15511111551155111115510000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11555555511115555555110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+51111111115511111111150000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -2032,35 +1717,35 @@ ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc330dc11c11cd30000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003005655
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003005655
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003005555
-33333333333333333337333333333333333333333333333333330000000000000000000000000000000000000000000000000000000000000000000003005555
-30000070000033000000000003300000000000330000000000030000000000000000000000000000000000000000004444444444444444444e84448441008888
-3000007000003700000000000330000000000773000000000007000000000000000000000000000000000000000000880000088408000804e88008ee45555555
-37700000000033000000000777300000000007730000000000030000000000000000000003333333333333363333308088888084880008848883088e83555555
-30077007770033000000007777300000000070330700000000030000000000000000000003000730003300773067704800000844008380044b30b3884333333f
-3000000777703300700000777330770007000033000000000003000000000000000000000300773677730777307570480080084400383004408e8300430000f0
-300007777770330777007000033077000000003300000000000300000000000000000000030777377773777730777048000008440883000443eee0b0430000f0
-3000777770003307770000000330000000000033000000000003000000000000000000000377753777567575307750808888808400800004408e8000430090f4
-3000777770003300700007700330000000700033000000000003000000000000000000000677753777537775307750884444488444444444444b444443094499
-30000777007033000000777003300000000770330000000000730000000000000000000003777737577307773077700000000000037733333333373333009977
-30000000000733000000077003300000000770330000000000030000000000000000000003077536777300773077733337733333337770003300770033097777
-30000000700033000000000007300000000000330000000000030000000000000000000003007730003300073067730007700000330770003300770033f77777
-30000000700033000000000003300000000000330000000000030000000000000000000003333633333333333333337700770000330777003300770033f77777
-3333333333333333333337333333333333333333333333333333000000000000000000000000337767777733777333777067000033007707730077003f777777
-3333333733333330000000000000000000000000000000000000000000000000000000000000d777777777d7777773067706700773776677777777077f777777
-3000330703300030000000000000000000000000000000000000000000000000000000000000d77dd76003d77dd7777066766777777776773777677779777777
-3000330703300030000000000000000000000000000000000000000000000000000000000000d777777777d77777777776666776377676773767677739777777
-3070330703307030000000000000000000000000000000000000000000533333333333333300d77dd77777d77dd7730666666660336767773666776039777777
-7777737773377730000000000000000000000000000000000000000000555511111111111100d677777003d67777630006666dd03306676d3667760039777777
-307033070330703000000000000000000000000000000000000000000011111111000000030033666633333366666333333ddd33333366d333dddd3333977777
-300033070330003000000000000000000000000000000000000000000055551000000000035111113333773333663333773333773333f63333cbb33333977777
-3000330703300030000000000000000000000000000000000000000000550000000000000311555530777730666630777730f77730979630accbbee033047777
-333333373333333000000000000000000000000000000000000000000051000000001111131551113777773666663ddd77377ff737f9f73aaccbbee833f94977
-000000000000000000000000000000000000000000000000000000000051000000015555511511153ddd773777773777773ff7963f76763aaccbbee833944999
-0000000000000000000000000000000000000000000000000000000000110000000151115115115177777777dd7777d777ff66f7f7ff966aaccbbee883099494
-0000000000000000000000000000000000000000000000000000000000110000000151515115111577d7777777d77d7d7799ff667679f76aaccbbee883000094
-000000000000000000000000000000000000000000000000000000000011111111115555511551117d7d7777777777777777996697f6766aaccbbee883000099
-0000000000000000000000000000000000000000000000000000000000110000000155155111555577d7777d7d7777dddd699997f977976aaccbbee883000009
-0000000000000000000000000000000000000000000000000000000000113333333115551151111177777777d77777dddd966777f79f766aaccbbee883000009
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003005555
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004444444444444444444e84448441008888
+0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000880000088408000804e88008ee45555555
+00000000000000000000000000000000000000000000000000000000000000000000000003333333333333363333308088888084880008848883088e83555555
+00000000000000000000000000000000000000000000000000000000000000000000000003000730003300773067704800000844008380044b30b3884333333f
+0000000000000000000000000000000000000000000000000000000000000000000000000300773677730777307570480080084400383004408e8300430000f0
+000000000000000000000000000000000000000000000000000000000000000000000000030777377773777730777048000008440883000443eee0b0430000f0
+0000000000000000000000000000000000000000000000000000000000000000000000000377753777567575307750808888808400800004408e8000430090f4
+0000000000000000000000000000000000000000000000000000000000000000000000000677753777537775307750884444488444444444444b444443094499
+00000000000000000000000000000000000000000000000000000000000000000000000003777737577307773077700000000000037733333333373333009977
+00000000000000000000000000000000000000000000000000000000000000000000000003077536777300773077733337733333337770003300770033097777
+00000000000000000000000000000000000000000000000000000000000000000000000003007730003300073067730007700000330770003300770033f77777
+00000000000000000000000000000000000000000000000000000000000000000000000003333633333333333333337700770000330777003300770033f77777
+0000000000000000000000000000000000000000000000000000000000000000000000000000337767777733777333777067000033007707730077003f777777
+0000000000000000000000000000000000000000000000000000000000000000000000000000d777777777d7777773067706700773776677777777077f777777
+0000000000000000000000000000000000000000000000000000000000000000000000000000d77dd76003d77dd7777066766777777776773777677779777777
+0000000000000000000000000000000000000000000000000000000000000000000000000000d777777777d77777777776666776377676773767677739777777
+0000000000000000000000000000000000000000000000000000000000533333333333333300d77dd77777d77dd7730666666660336767773666776039777777
+0000000000000000000000000000000000000000000000000000000000555511111111111100d677777003d67777630006666dd03306676d3667760039777777
+000000000000000000000000000000000000000000000000000000000011111111000000030033666633333366666333333ddd33333366d333dddd3333977777
+000000000000000000000000000000000000000000000000000000000055551000000000030000003333773333663333773333773333f63333cbb33333977777
+0000000000000000000000000000000000000000000000000000000000550000000000000300000030777730666630777730f77730979630accbbee033047777
+000000000000000000000000000000000000000000000000000000000051000000001111130000003777773666663ddd77377ff737f9f73aaccbbee833f94977
+000000000000000000000000000000000000000000000000000000000051000000015555510000003ddd773777773777773ff7963f76763aaccbbee833944999
+0000000000000000000000000000000000000000000000000000000000110000000151115100000077777777dd7777d777ff66f7f7ff966aaccbbee883099494
+0000000000000000000000000000000000000000000000000000000000110000000151515100000077d7777777d77d7d7799ff667679f76aaccbbee883000094
+000000000000000000000000000000000000000000000000000000000011111111115555510000007d7d7777777777777777996697f6766aaccbbee883000099
+0000000000000000000000000000000000000000000000000000000000110000000155155100000077d7777d7d7777dddd699997f977976aaccbbee883000009
+0000000000000000000000000000000000000000000000000000000000113333333115551100000077777777d77777dddd966777f79f766aaccbbee883000009
 0000000000000000000000000000000000000000000000000000000000000311113333333331111377d77777777777dddd977ff76f9767111ee11cc113000009
 0123000000000000000000000000000000000000000000000000000000000111551000000015555137dddd377ddd377ddd37779639f696311ee11cc1330000f9
 45670000000000000000000000000000000000000000000000000000000001111555555555555511367777377d773677773799773f9f763ddddddddd330000f9
