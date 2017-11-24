@@ -19,6 +19,54 @@ coordinates:
 hurtbox_channels:
 	1: player
 	2: pickup
+
+symbols:
+	up:		”
+	down:	ƒ
+	left:	‹
+	right:	‘
+
+token count: 7674 tokens
+	boss: 2338 tokens
+	player: 862 tokens
+	other entities: 1998 tokens
+	helper methods: 704 tokens
+	draw_game: 497 tokens
+	spawn_entity: 406 tokens
+	color ramps: 135 tokens
+	easing functions: 57 tokens
+	other boilerplate: 677 tokens
+
+thenables:
+	function basic_action(self,a,b,c)
+		self:move(...)
+		return promise(12)
+	end
+	function composed_action(self,a,b,c)
+		return promise(5)
+			.then("basic_action",a,b,c)
+			.then("basic_action",a,b,c)
+	end
+	function composed_action_2(self,a,b,c)
+		return self:basic_action(a,b,c)
+			.then("basic_action",a,b,c)
+	end
+	function composed_action_3(self,a,b,c)
+		return self:basic_action(a,b,c)
+			.then(function()
+				self:move(...)
+				return 12
+			end)
+	end
+	function async_composed_action(self,a,b,c)
+		return self:basic_action(a,b,c)
+			.then_async(5,"basic_action",a,b,c)
+			.then("basic_action",a,bc)
+	end
+	function final_action(self)
+		return then("composed_action",a,b,c)
+			.then("")
+	end
 ]]
 
 -- useful noop function
@@ -62,6 +110,13 @@ local screen_shake_frames
 local next_scene
 local transition_frames_left
 
+-- global promise vars
+local promises
+
+-- global config vars
+local training_mode=false
+local speed_mode=true
+
 -- global input vars
 local buttons
 local button_presses
@@ -87,6 +142,48 @@ local boss_health
 local entities
 local new_entities
 local entity_classes={
+	instructions={
+		x=40,
+		y=-25,
+		up_pressed=false,
+		down_pressed=false,
+		left_pressed=false,
+		right_pressed=false,
+		button_presses=0,
+		update=function(self)
+			self:check_button_press("up",2)
+			self:check_button_press("down",3)
+			self:check_button_press("left",0)
+			self:check_button_press("right",1)
+		end,
+		draw=function(self)
+			local fade=4
+			if self.frames_to_death>0 then
+				fade=mid(6,6-flr(self.frames_to_death/15),4)
+			end
+			color(color_ramps[6][fade])
+			print("press",self.x-9,self.y-18)
+			print("to move",self.x-13,self.y+14)
+			print("”",self.x-3,self.y-9,self:choose_color("up",fade))
+			print("‹",self.x-11,self.y-2,self:choose_color("left",fade))
+			print("‘",self.x+5,self.y-2,self:choose_color("right",fade))
+			print("ƒ",self.x-3,self.y+5,self:choose_color("down",fade))
+		end,
+		on_death=function(self)
+			spawn_magic_tile(50)
+		end,
+		check_button_press=function(self,dir,index)
+			if btn(index) and not self[dir.."_pressed"] then
+				self[dir.."_pressed"]=true
+				self.button_presses+=1
+				self.frames_to_death=45*(5-self.button_presses)
+			end
+		end,
+		choose_color=function(self,dir,fade)
+			local color=ternary(self[dir.."_pressed"],12,6)
+			return color_ramps[color][fade]
+		end
+	},
 	movable={
 		apply_move=function(self)
 			if self.movement then
@@ -136,6 +233,7 @@ local entity_classes={
 					end_x+anchor_x2,end_y+anchor_y2,
 					end_x,end_y)
 			}
+			return max(0,dur-1)
 		end
 	},
 	player={
@@ -231,7 +329,7 @@ local entity_classes={
 			-- self:cancel_move(self:col(),self:row())
 			self.invincibility_frames=60
 			self.stun_frames=19
-			self.player_health:lose_heart()
+			player_health:lose_heart()
 		end,
 		draw=function(self)
 			palt(3,true)
@@ -261,9 +359,9 @@ local entity_classes={
 				sprite_x=64
 				sprite_y=20
 			elseif self.invincibility_frames%4>2 then
-				return	
+				return
 			elseif self.teeter_frames>0 then
-				sprite_x=ternary(self.teeter_frames<=2,52,40)
+				sprite_x=ternary(self.teeter_frames<=2,52,40) -- 64)
 				sprite_width=12
 				if self.facing=="up" then
 					sprite_dx=6
@@ -290,6 +388,7 @@ local entity_classes={
 		end
 	},
 	player_health={
+		visible=false,
 		hearts=3,
 		anim=nil,
 		anim_frames=0,
@@ -310,6 +409,10 @@ local entity_classes={
 				self.anim="lose"
 				self.anim_frames=20
 			end
+			if self.visible then
+				self.visible=false
+				freeze_frames=max(freeze_frames,20)
+			end
 			return self.hearts<=0
 		end,
 		update=function(self)
@@ -318,80 +421,113 @@ local entity_classes={
 			end
 		end,
 		draw=function(self)
-			palt(3,true)
-			local i
-			for i=1,4 do
-				local sprite
-				sspr(0,30,9,7,self.x+8*i-24,self.y-3)
-				if self.anim=="gain" and i==self.hearts then
-					sprite=mid(1,5-flr(self.anim_frames/2),3)
-				elseif self.anim=="lose" and i==self.hearts+1 then
-					sprite=6
-				elseif i<=self.hearts then
-					sprite=4
-				else
-					sprite=0
-				end
-				if sprite!=6 or self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
-					sspr(9*sprite,30,9,7,self.x+8*i-24,self.y-3)
+			if self.visible then
+				palt(3,true)
+				local i
+				for i=1,4 do
+					local sprite
+					sspr(0,30,9,7,self.x+8*i-24,self.y-3)
+					if self.anim=="gain" and i==self.hearts then
+						sprite=mid(1,5-flr(self.anim_frames/2),3)
+					elseif self.anim=="lose" and i==self.hearts+1 then
+						sprite=6
+					elseif i<=self.hearts then
+						sprite=4
+					else
+						sprite=0
+					end
+					if sprite!=6 or self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
+						sspr(9*sprite,30,9,7,self.x+8*i-24,self.y-3)
+					end
 				end
 			end
 		end
 	},
 	boss_health={
+		visible=false,
 		health=0,
 		visible_health=0,
-		glow_frames=0,
+		rainbow_frames=0,
+		phase=0,
 		x=63,
 		y=5,
 		render_layer=10,
 		update_priority=0,
 		gain_health=function(self,health)
 			self.health=mid(0,self.health+health,60)
-			self.glow_frames=5+(self.health-self.visible_health)
+			self.rainbow_frames=15+(self.health-self.visible_health)
+			if self.phase==0 then
+				if self.health>=20 and not self.visible then
+					self.visible=true
+				end
+				if self.health>=40 then
+					boss.rainbow_frames=self.rainbow_frames
+				end
+				if self.health>=50 and not boss.visible then
+					boss.visible=true
+				end
+				if self.health>=60 then
+--					boss:schedule(55,"intro")
+				end
+			end
+		end,
+		next_phase=function(self)
+			self.phase+=1
+			self.health=0
 		end,
 		update=function(self)
 			if self.visible_health<self.health then
 				self.visible_health+=1
 			end
-			decrement_counter_prop(self,"glow_frames")
+			if self.visible_health>self.health then
+				self.visible_health-=1
+			end
+			decrement_counter_prop(self,"rainbow_frames")
 		end,
 		draw=function(self)
-			if self.glow_frames>0 then
-				pal(5,rainbow[1+flr(scene_frame/4)%#rainbow])
+			if self.visible then
+				if self.rainbow_frames>0 then
+					pal(5,rainbow[1+flr(scene_frame/4)%#rainbow])
+				end
+				rect(self.x-30,self.y-3,self.x+30,self.y+3,5)
+				rectfill(self.x-30,self.y-3,self.x+mid(-30,-31+self.visible_health,29),self.y+3,5)
 			end
-			rect(self.x-30,self.y-3,self.x+30,self.y+3,5)
-			rectfill(self.x-30,self.y-3,self.x+mid(-30,-31+self.visible_health,29),self.y+3,5)
+		end
+	},
+	magic_tile_spawn={
+		frames_to_death=10,
+		draw=function(self)
+			if self.frames_to_death<=10 then
+				local d=self.frames_to_death
+				rect(self.x-4-d,self.y-3-d,self.x+4+d,self.y+3+d,ternary(self.frames_alive<4,5,6))
+			end
+		end,
+		on_death=function(self)
+			screen_shake_frames=max(screen_shake_frames,1)
+			spawn_entity("magic_tile",{x=self.x,y=self.y})
+			make_sparks(self.x,self.y,0,-3,4,"rainbow",0.3)
 		end
 	},
 	magic_tile={
 		hurtbox_channel=2,
 		render_layer=3,
 		draw=function(self)
-			pal(7,rainbow[1+flr(scene_frame/4)%#rainbow])
-			rectfill(self.x-4,self.y-3,self.x+4,self.y+3,1)
-			rect(self.x-4,self.y-3,self.x+4,self.y+3,7)
-			rect(self.x-2,self.y-1,self.x+2,self.y+1,7)
+			local fade=mid(1,flr(self.frames_alive/2),4)
+			local color=color_ramps[rainbow[1+flr(scene_frame/4)%#rainbow]][fade]
+			local background_color=color_ramps[1][fade]
+			rectfill(self.x-4,self.y-3,self.x+4,self.y+3,background_color)
+			rect(self.x-4,self.y-3,self.x+4,self.y+3,color)
+			rect(self.x-2,self.y-1,self.x+2,self.y+1,color)
 		end,
 		on_hurt=function(self)
 			freeze_frames=max(freeze_frames,1)
-			screen_shake_frames=max(screen_shake_frames,2)
+			screen_shake_frames=max(screen_shake_frames,3)
 			spawn_entity("magic_tile_fade",{x=self.x,y=self.y})
-			local i
-			for i=1,20 do
-				local angle=rnd_int(0,360)
-				local speed=rnd_int(7,15)
-				local cos_angle=cos(angle/360)
-				local sin_angle=sin(angle/360)
-				spawn_entity("rainbow_spark",{
-					x=self.x+5*cos_angle,
-					y=self.y+5*sin_angle,
-					vx=speed*cos_angle,
-					vy=speed*sin_angle-10,
-					frames_to_death=rnd_int(13,19)
-				})
-			end
+			make_sparks(self.x,self.y,0,-10,30,"rainbow",1)
 			boss_health:gain_health(10)
+			if boss_health.health<60 then
+				spawn_magic_tile(100-min(self.frames_alive,30)) -- 30 frame grace period
+			end
 			self:die()
 		end
 	},
@@ -430,8 +566,6 @@ local entity_classes={
 	heart={
 		hurtbox_channel=2,
 		frames_to_death=150,
-		update=function(self)
-		end,
 		draw=function(self)
 			local f=self.frames_to_death
 			if f>30 or f%4>1 then
@@ -443,7 +577,9 @@ local entity_classes={
 			end
 		end,
 		on_hurt=function(self)
+			freeze_frames=max(freeze_frames,2)
 			player_health:gain_heart()
+			make_sparks(self.x,self.y,0,-3,6,8,0.3)
 			self:die()
 		end
 	},
@@ -560,33 +696,31 @@ local entity_classes={
 	},
 	magic_mirror={
 		extends="movable",
-		expression=1,
-		wearing_top_hat=true,
+		visible=false,
+		x=40,
+		y=-28,
+		rainbow_frames=0,
+		expression=4,
+		wearing_top_hat=false,
 		charge_frames=0,
 		laser_preview_frames=0,
 		laser_frames=0,
 		hover_frames=0,
 		hitbox_channel=1, -- player
 		hover_dir=nil,
+		actions={},
 		init=function(self)
 			self.left_hand=spawn_entity("magic_mirror_hand",{x=self.x-18,y=self.y+5})
 			self.right_hand=spawn_entity("magic_mirror_hand",{x=self.x+18,y=self.y+5,is_right_hand=true})
-			-- self:conjure_flowers()
-			-- self.left_hand:throw_cards()
-			-- self.right_hand:throw_cards()
-			self:shoot_lasers()
-		end,
-		is_hitting=function(self,entity)
-			return self.laser_frames>0 and entity:col()==self:col()
 		end,
 		update=function(self)
+			decrement_counter_prop(self,"rainbow_frames")
 			decrement_counter_prop(self,"laser_preview_frames")
 			decrement_counter_prop(self,"laser_frames")
 			if decrement_counter_prop(self,"hover_frames") then
 				self.vx=0
 				self.vy=0
 			end
-			self:check_schedule()
 			self:apply_move()
 			if self.hover_frames>0 then
 				if self.x<=5 then
@@ -610,135 +744,258 @@ local entity_classes={
 				})
 			end
 		end,
+		draw=function(self)
+			if self.visible then
+				-- draw mirror
+				self:reset_colors()
+				pal(15,9)
+				sspr2(121,98,7,30,self.x-6,self.y-12)
+				pal(15,15)
+				sspr2(121,98,7,30,self.x,self.y-12,true)
+				pset(self.x-1,self.y+16,4)
+			end
+			if self.visible or self.rainbow_frames>0 then
+				-- draw face
+				if self.expression>0 then
+					self:reset_colors()
+					local flip_vertical=(self.expression==5 and (self.frames_alive)%4<2)
+					pal(9,6)
+					pal(15,7)
+					self:apply_rainbow_colors()
+					sspr2(74+6*self.expression,114,6,14,self.x-5,self.y-7,false,flip_vertical)
+					self:reset_colors()
+					pal(9,7)
+					pal(15,6)
+					self:apply_rainbow_colors()
+					if self.expression==6 then
+						sspr2(80+6*self.expression,114,6,14,self.x+1,self.y-7,false,flip_vertical)
+					else
+						sspr2(74+6*self.expression,114,6,14,self.x,self.y-7,true,flip_vertical)
+					end
+				end
+			end
+			if self.visible then
+				-- draw top hat
+				if self.wearing_top_hat then
+					self:reset_colors()
+					pal(6,5)
+					sspr2(121,89,7,9,self.x-6,self.y-15)
+					pal(6,6)
+					sspr2(121,89,7,9,self.x,self.y-15,true)
+				end
+				-- draw laser
+				if self.laser_preview_frames%2==1 then
+					self:reset_colors()
+					line(self.x,self.y+7,self.x,60,14)
+				end
+				if self.laser_frames>0 then
+					self:reset_colors()
+					rect(self.x-5,self.y+4,self.x+5,60,14)
+					rect(self.x-4,self.y+4,self.x+4,60,15)
+					rectfill(self.x-3,self.y+4,self.x+3,60,7)
+					-- line(self.x-4,self.y,self.x-4,60,7)
+					-- line(self.x,1,self.x,39,14)
+				end
+			end
+		end,
+		is_hitting=function(self,entity)
+			return self.laser_frames>0 and entity:col()==self:col()
+		end,
+		-- highest-level commands
+		intro=function(self)
+			if false then
+				self:change_expression(1)
+				self:don_top_hat()
+				self.right_hand:appear()
+				self.right_hand:change_pose(4)
+				self.left_hand:appear()
+				self.left_hand:grab_mirror_handle(self)
+				return self:promise(20)
+			else
+				return self:promise(20)
+					:and_then(self.right_hand,"appear"):and_then(30)
+					:and_then("change_pose",4):and_then(6)
+					:and_then("change_pose",5):and_then(6)
+					:and_then("change_pose",4):and_then(6)
+					:and_then("change_pose",5):and_then(6)
+					:and_then("change_pose",4):and_then(10)
+					:and_then(self.left_hand,"appear"):and_then(30)
+					:and_then("grab_mirror_handle",self):and_then(5)
+					:and_then(self,"change_expression",5):and_then(33)
+					:and_then("change_expression",6):and_then(25)
+					:and_then("change_expression",5):and_then(20)
+					:and_then("change_expression",1):and_then(30)
+					:and_then(function()
+						self.right_hand:tap_mirror(self)
+					end):and_then(10)
+					:and_then(self,"don_top_hat"):and_then(10)
+			end
+		end,
+		decide_next_action=function(self)
+			return self:throw_cards():and_then("decide_next_action")
+		end,
+		-- medium-level commands
+		throw_cards=function(self)
+			local promise=self:promise()
+			if self.left_hand.held_mirror then
+				promise=promise:and_then(self.left_hand,"release_mirror")
+			end
+			if self.right_hand.held_mirror then
+				promise=promise:and_then(self.right_hand,"release_mirror")
+			end
+			return promise
+				:and_then(function()
+					-- return all_promises(self,
+					return all_promises(self,self.left_hand:throw_cards(),self.right_hand:throw_cards()) --,
+						-- self.right_hand:throw_cards())
+				end)
+				:and_then(self,10)
+		end,
+		-- lowest-level commands
+		don_top_hat=function(self)
+			self.wearing_top_hat=true
+			self:poof(0,-10)
+			return 12
+		end,
+		poof=function(self,dx,dy)
+			spawn_entity("poof",{x=self.x+(dx or 0),y=self.y+(dy or 0)})
+		end,
 		change_expression=function(self,expression)
 			self.expression=expression
 		end,
+		--
 		shoot_lasers=function(self)
-			local hover_frames=25
-			local laser_frames=65
-			self.left_hand:grab_mirror(self)
-			self:schedule(20,"change_expression",5)
-			self:schedule(26,"move_to_player_col")
-			self:schedule(36,"shoot_laser")
-			local f=36+laser_frames
-			local i
-			for i=1,3 do
-				self:schedule(f,"hover",hover_frames)
-				f+=hover_frames
-				self:schedule(f,"shoot_laser")
-				f+=laser_frames
-			end
+-- 			local hover_frames=25
+-- 			local laser_frames=65
+-- 			self:change_expression(5)
+-- --			self:schedule(6,"move_to_player_col")
+-- --			self:schedule(16,"shoot_laser")
+-- 			local f=16+laser_frames
+-- 			local i
+-- 			for i=1,2 do
+-- --				self:schedule(f,"hover",hover_frames)
+-- 				f+=hover_frames
+-- --				self:schedule(f,"shoot_laser")
+-- 				f+=laser_frames
+-- 			end
 		end,
 		hover=function(self,frames,dir)
-			self.hover_frames=frames
-			self.hover_dir=dir or self.hover_dir or 1
+			-- self.hover_frames=frames
+			-- self.hover_dir=dir or self.hover_dir or 1
 		end,
 		shoot_laser=function(self)
-			local charge_frames=14
-			local preview_frames=12
-			local laser_frames=25
-			self:change_expression(4)
-			self:charge_laser(charge_frames)
-			self:schedule(charge_frames,"preview_laser",preview_frames+laser_frames+4)
-			self:schedule(charge_frames+preview_frames,"fire_laser",laser_frames)
-			self:schedule(charge_frames+preview_frames,"change_expression",0)
-			self:schedule(charge_frames+preview_frames+laser_frames,"change_expression",4)
+			-- local charge_frames=14
+			-- local preview_frames=12
+			-- local laser_frames=25
+			-- self:change_expression(4)
+			-- self:charge_laser(charge_frames)
+--			self:schedule(charge_frames,"preview_laser",preview_frames+laser_frames+4)
+--			self:schedule(charge_frames+preview_frames,"fire_laser",laser_frames)
+--			self:schedule(charge_frames+preview_frames,"change_expression",0)
+--			self:schedule(charge_frames+preview_frames+laser_frames,"change_expression",4)
 		end,
 		charge_laser=function(self,frames)
-			self.charge_frames=frames
+			-- self.charge_frames=frames
 		end,
 		preview_laser=function(self,frames)
-			self.laser_preview_frames=frames
+			-- self.laser_preview_frames=frames
 		end,
 		fire_laser=function(self,frames)
-			self.laser_frames=frames
+			-- self.laser_frames=frames
+		end,
+		reset_state=function(self,held_hand)
+			-- if not self.left_hand.held_mirror or not self.right_hand.held_mirror then
+			-- 	self:set_held_hands(held_hand or "left")
+			-- end
+			-- if self.expression!= 1 then
+--				self:schedule(5,"change_expression",5)
+--				self:schedule(16,"change_expression",1)
+			-- end
+--			self:schedule(15,"move_to_home")
+--			self:schedule(45,"set_held_hands",held_hand)
+		end,
+		move_to_home=function(self)
+			-- lasts 30 frames
+			-- self:move(40,-28,30,{easing=ease_in,relative=false})
+			-- if not self.left_hand.held_mirror then
+			-- 	self.left_hand:move_to_home(40,-28)
+			-- end
+			-- if not self.right_hand.held_mirror then
+			-- 	self.right_hand:move_to_home(40,-28)
+			-- end
+		end,
+		set_held_hands=function(self,held_hand)
+			-- lasts 10 frames
+			-- if self.left_hand.held_mirror and held_hand!="left" then
+			-- 	self.left_hand:release_mirror()
+			-- elseif not self.left_hand.held_mirror and held_hand=="left" then
+			-- 	self.left_hand:grab_mirror(self)
+			-- end
+			-- if self.right_hand.held_mirror and held_hand!="right" then
+			-- 	self.right_hand:release_mirror()
+			-- elseif not self.right_hand.held_mirror and held_hand=="right" then
+			-- 	self.right_hand:grab_mirror(self)
+			-- end
 		end,
 		conjure_flowers=function(self)
-			local increment=3
-			local time_to_bloom=70
-			self.left_hand:change_pose(1)
-			self.left_hand:move(self.x-15,self.y,20)
-			self.right_hand:change_pose(1)
-			self.right_hand:move(self.x+15,self.y,20)
-			self:schedule(20,"change_expression",2)
-			self:schedule(30,"spawn_flowers",increment,time_to_bloom)
-			self:schedule(29+time_to_bloom,"change_expression",3)
-			self.left_hand:schedule(29+time_to_bloom,"change_pose",4)
-			self.right_hand:schedule(29+time_to_bloom,"change_pose",4)
+			-- local increment=3
+			-- local time_to_bloom=70
+			-- self.left_hand:change_pose(1)
+			-- self.left_hand:move(self.x-15,self.y,20,{easing=ease_in})
+			-- self.right_hand:change_pose(1)
+			-- self.right_hand:move(self.x+15,self.y,20,{easing=ease_in})
+--			self:schedule(10,"change_expression",2)
+--			self:schedule(30,"spawn_flowers",increment,time_to_bloom)
+--			self:schedule(29+time_to_bloom,"change_expression",3)
+--			self.left_hand:schedule(29+time_to_bloom,"change_pose",4)
+--			self.right_hand:schedule(29+time_to_bloom,"change_pose",4)
 		end,
 		spawn_flowers=function(self,increment,time_to_bloom)
-			local restricted_col=rnd_int(0,3)
-			local restricted_row=rnd_int(0,4)
-			local flowers={}
-			local i=rnd_int(0,increment-1)
-			while i<40 do
-				local c=i%8
-				local r=flr(i/8)
-				if (c!=restricted_col and (7-c)!=restricted_col) or r!=restricted_row then
-					add(flowers,{
-						x=10*c+5,
-						y=8*r+4,
-						bloom_frames=time_to_bloom,
-						flipped=(rnd()<0.5),
-						color=rnd_from_list({8,12,9,14})
-					})
-				end
-				i+=rnd_int(1,increment)
-			end
-			shuffle_list(flowers)
-			for i=1,#flowers do
-				flowers[i].hidden_frames=i
-				spawn_entity("flower_patch",flowers[i])
-			end
+			-- local restricted_col=rnd_int(0,3)
+			-- local restricted_row=rnd_int(0,4)
+			-- local flowers={}
+			-- local i=rnd_int(0,increment-1)
+			-- while i<40 do
+			-- 	local c=i%8
+			-- 	local r=flr(i/8)
+			-- 	if (c!=restricted_col and (7-c)!=restricted_col) or r!=restricted_row then
+			-- 		add(flowers,{
+			-- 			x=10*c+5,
+			-- 			y=8*r+4,
+			-- 			bloom_frames=time_to_bloom,
+			-- 			flipped=(rnd()<0.5),
+			-- 			color=rnd_from_list({8,12,9,14})
+			-- 		})
+			-- 	end
+			-- 	i+=rnd_int(1,increment)
+			-- end
+			-- shuffle_list(flowers)
+			-- for i=1,#flowers do
+			-- 	flowers[i].hidden_frames=i
+			-- 	spawn_entity("flower_patch",flowers[i])
+			-- end
 		end,
 		move_to_player_col=function(self,a,b,c,d)
 			-- 20 frames
-			self:move(10*player:col()-5,-20,20,{easing=ease_in,immediate=true,anchors={0,10,0,-10}})
+			-- self:move(10*player:col()-5,-20,20,{easing=ease_in,immediate=true})
 		end,
-		draw=function(self)
+		reset_colors=function(self)
+			pal()
 			palt(3,true)
-			-- draw mirror
-			pal(15,9)
-			sspr2(121,98,7,30,self.x-6,self.y-12)
-			pal(15,15)
-			sspr2(121,98,7,30,self.x,self.y-12,true)
-			pset(self.x-1,self.y+16,4)
-			-- draw face
-			if self.expression>0 then
-				local flip_vertical=(self.expression==5 and (self.frames_alive)%4<2)
-				pal(9,6)
-				pal(15,7)
-				sspr2(74+6*self.expression,114,6,14,self.x-5,self.y-7,false,flip_vertical)
-				pal(9,7)
-				pal(15,6)
-				if self.expression==6 then
-					sspr2(80+6*self.expression,114,6,14,self.x+1,self.y-7,false,flip_vertical)
-				else
-					sspr2(74+6*self.expression,114,6,14,self.x,self.y-7,true,flip_vertical)
+		end,
+		apply_rainbow_colors=function(self)
+			if self.rainbow_frames>0 then
+				local c=rainbow[1+flr(scene_frame/4)%#rainbow]
+				local i
+				for i=1,15 do
+					pal(i,c)
 				end
-			end
-			-- draw top hat
-			if self.wearing_top_hat then
-				pal(6,5)
-				sspr2(121,89,7,9,self.x-6,self.y-15)
-				pal(6,6)
-				sspr2(121,89,7,9,self.x,self.y-15,true)
-			end
-			-- draw laser
-			if self.laser_preview_frames%2==1 then
-				line(self.x,self.y+7,self.x,60,14)
-			end
-			if self.laser_frames>0 then
-				rect(self.x-5,self.y+4,self.x+5,60,14)
-				rect(self.x-4,self.y+4,self.x+4,60,15)
-				rectfill(self.x-3,self.y+4,self.x+3,60,7)
-				-- line(self.x-4,self.y,self.x-4,60,7)
-				-- line(self.x,1,self.x,39,14)
 			end
 		end
 	},
 	magic_mirror_hand={
 		-- is_right_hand
+		visible=false,
 		render_layer=7,
 		extends="movable",
 		held_mirror=nil,
@@ -748,65 +1005,7 @@ local entity_classes={
 		init=function(self)
 			self.dir=ternary(self.is_right_hand,-1,1)
 		end,
-		change_pose=function(self,pose)
-			self.pose=pose
-		end,
-		move_to_row=function(self,row)
-			-- lasts 20 frames
-			self:change_pose(3)
-			self:move(ternary(self.is_right_hand,90,-10),8*row-4,20,{easing=ease_in_out,anchors={-self.dir*10,-10,-self.dir*10,10}})
-			self:schedule(20,"change_pose",2)
-		end,
-		grab_mirror=function(self,mirror)
-			-- lasts 20 frames
-			local dx=-3*self.dir
-			local dy=12
-			self:change_pose(3)
-			self:move_to_mirror_handle(mirror,dx,dy)
-			self:schedule(20,"hold_mirror",mirror,dx,dy)
-			self:schedule(20,"change_pose",2)
-		end,
-		move_to_mirror_handle=function(self,mirror,dx,dy)
-			-- lasts 20 frames
-			self:move(mirror.x+dx,mirror.y+dy,20,{easing=ease_out,anchors={-10*self.dir,10,-25*self.dir,0}})
-		end,
-		hold_mirror=function(self,mirror,dx,dy)
-			self.held_mirror=mirror
-			self.held_mirror_dx=dx
-			self.held_mirror_dy=dy
-		end,
-		release_mirror=function(self,mirror)
-			-- lasts 25 frames
-			self.held_mirror=nil
-			self:change_pose(3)
-			self:move(-15*self.dir,-3,25,{easing=ease_in,relative=true})
-		end,
-		throw_card=function(self)
-			-- lasts 14 frames
-			self:change_pose(1)
-			spawn_entity("playing_card",{x=self.x+10*self.dir,y=self.y,vx=self.dir,is_red=(rnd()<0.5)})
-			self:schedule(14,"change_pose",2)
-		end,
-		throw_card_at_row=function(self,row)
-			-- 26 frames before, 14 frames after (40 total)
-			self:move_to_row(row)
-			self:schedule(26,"change_pose",1)
-			self:schedule(26,"throw_card")
-		end,
-		throw_cards=function(self)
-			-- lasts 168 frames?
-			local t=56
-			if self.is_right_hand then
-				self:throw_card_at_row(1)
-				self:schedule(t,"throw_card_at_row",3)
-				self:schedule(2*t,"throw_card_at_row",5)
-			else
-				self:schedule(0.5*t,"throw_card_at_row",2)
-				self:schedule(1.5*t,"throw_card_at_row",4)
-			end
-		end,
 		update=function(self)
-			self:check_schedule()
 			self:apply_move()
 			self:apply_velocity()
 			if self.held_mirror then
@@ -817,23 +1016,94 @@ local entity_classes={
 			end
 		end,
 		draw=function(self)
-			palt(3,true)
-			local r=self.is_right_hand
-			if self.pose==1 then
-				sspr2(76,107,10,7,self.x-ternary(r,8,1),self.y-3,r)
-			elseif self.pose==2 then
-				sspr2(86,107,7,7,self.x-ternary(r,5,1),self.y-3,r)
-			elseif self.pose==3 then
-				sspr2(93,104,12,10,self.x-ternary(r,5,6),self.y-7,r)
-			elseif self.pose==4 then
-				sspr2(105,103,8,11,self.x-ternary(r,3,4),self.y-9,r)
-			elseif self.pose==5 then
-				sspr2(113,103,8,11,self.x-ternary(r,4,3),self.y-9,r)
+			if self.visible then
+				palt(3,true)
+				local r=self.is_right_hand
+				if self.pose==1 then
+					sspr2(76,107,10,7,self.x-ternary(r,8,1),self.y-3,r)
+				elseif self.pose==2 then
+					sspr2(86,107,7,7,self.x-ternary(r,5,1),self.y-3,r)
+				elseif self.pose==3 then
+					sspr2(93,104,12,10,self.x-ternary(r,5,6),self.y-7,r)
+				elseif self.pose==4 then
+					sspr2(105,103,8,11,self.x-ternary(r,3,4),self.y-9,r)
+				elseif self.pose==5 then
+					sspr2(113,103,8,11,self.x-ternary(r,4,3),self.y-9,r)
+				end
 			end
-			-- pset(self.x,self.y,8)
-		end
+		end,
+		-- highest-level commands
+		throw_cards=function(self)
+			if self.is_right_hand then
+				return self:promise()
+					:and_then("throw_card_at_row",1)
+					:and_then("throw_card_at_row",3)
+					:and_then("throw_card_at_row",5)
+			else
+				return self:promise(22)
+					:and_then("throw_card_at_row",2)
+					:and_then("throw_card_at_row",4)
+			end
+		end,
+		grab_mirror_handle=function(self,mirror)
+			local dx,dy=-3*self.dir,12
+			return self:promise("change_pose",3)
+				:and_then("move",mirror.x+dx,mirror.y+dy,10,{easing=ease_out,anchors={-10*self.dir,5,0,20}})
+				:and_then("change_pose",2)
+				:and_then(function()
+					self.held_mirror=mirror
+					self.held_mirror_dx=dx
+					self.held_mirror_dy=dy
+				end)
+		end,
+		tap_mirror=function(self,mirror)
+			self:promise(9)
+				:and_then("change_pose",5):and_then(4)
+				:and_then("change_pose",4)
+			return self:promise("move",mirror.x-5*self.dir,mirror.y-3,10,{easing=ease_out,anchors={0,-10,-10*self.dir,-2}})
+				:and_then(2)
+				:and_then("move",self.x,self.y,10,{easing=ease_in,anchors={-10*self.dir,-2,0,-10}})
+		end,
+		-- medium-level commands
+		throw_card_at_row=function(self,row)
+			return self:promise("move_to_row",row):and_then(10)
+				:and_then("change_pose",1):and_then("spawn_card"):and_then(10)
+				:and_then("change_pose",2):and_then(4)
+		end,
+		release_mirror=function(self,mirror,instantly)
+			self.held_mirror=nil
+			self:change_pose(3)
+			return self:move(-15*self.dir,-7,25,{easing=ease_in,relative=true})
+		end,
+		appear=function(self)
+			self.visible=true
+			return self:promise("poof"):and_then(12)
+		end,
+		-- lowest-level commands
+		move_to_row=function(self,row)
+			return self:promise("change_pose",3)
+				:and_then("move",ternary(self.is_right_hand,90,-10),8*row-4,20,{easing=ease_in_out,anchors={-self.dir*10,-10,-self.dir*10,10}})
+				:and_then("change_pose",2)
+		end,
+		change_pose=function(self,pose)
+			self.pose=pose
+		end,
+		poof=function(self,dx,dy)
+			spawn_entity("poof",{x=self.x+(dx or 0),y=self.y+(dy or 0)})
+		end,
+		spawn_card=function(self)
+			spawn_entity("playing_card",{x=self.x+10*self.dir,y=self.y,vx=self.dir,is_red=(rnd()<0.5)})
+		end,
+		--
+		-- move_to_home=function(self,x,y)
+		-- 	-- self:move(x-self.dir*18,y+5,30,{relative=false,easing=ease_in})
+		-- end,
+		-- move_to_mirror_handle=function(self,mirror,dx,dy)
+		-- 	-- lasts 10 frames
+		-- 	-- self:move(mirror.x+dx,mirror.y+dy,10,{easing=ease_out,anchors={-10*self.dir,5,0,20}})
+		-- end,
 	},
-	rainbow_spark={
+	spark={
 		render_layer=6,
 		init=function(self)
 			self.prev_x=self.x
@@ -848,7 +1118,25 @@ local entity_classes={
 			self:apply_velocity()
 		end,
 		draw=function(self)
-			line(self.prev_x,self.prev_y,self.x,self.y,rainbow[1+flr(scene_frame/4)%#rainbow])
+			-- local c=self.color
+			-- if c=="rainbow" then
+			-- 	c=rainbow[1+flr(scene_frame/4)%#rainbow]
+			-- end
+			-- local fade=mid(1,self.frames_alive+1,4)
+			-- if self.frames_to_death<=5 then
+			-- 	fade=mid(5,7-flr(self.frames_to_death/2),6)
+			-- end
+			-- color(color_ramps[c][fade])
+			if self.color=="rainbow" then
+				color(rainbow[1+flr(scene_frame/4)%#rainbow])
+			else
+				local fade=mid(1,self.frames_alive+1,4)
+				if self.frames_to_death<=5 then
+					fade=mid(5,7-flr(self.frames_to_death/2),6)
+				end
+				color(color_ramps[self.color][fade])
+			end
+			line(self.prev_x,self.prev_y,self.x,self.y)
 		end
 	},
 	charge_particle={
@@ -867,10 +1155,11 @@ local entity_classes={
 		end
 	},
 	poof={
-		frames_to_death=16,
+		render_layer=9,
+		frames_to_death=12,
 		draw=function(self)
 			palt(3,true)
-			sspr(13*flr(self.frames_alive/4),94,13,14,self.x-7,self.y-7)
+			sspr(16*flr(self.frames_alive/3),37,16,14,self.x-8,self.y-8)
 		end
 	},
 	comet={
@@ -926,6 +1215,7 @@ local entity_classes={
 
 -- primary pico-8 functions (_init, _update, _draw)
 function _init()
+	promises={}
 	freeze_frames=0
 	transition_frames_left=0
 	screen_shake_frames=0
@@ -952,6 +1242,13 @@ function _update()
 			next_scene=nil
 		end
 	end
+	-- update promises
+	for i=1,#promises do
+		promises[i]:update()
+	end
+	filter_list(promises,function(promise)
+		return not promise.finished
+	end)
 	-- call the update function of the current scene
 	if freeze_frames>0 then
 		freeze_frames=decrement_counter(freeze_frames)
@@ -995,12 +1292,18 @@ function init_game()
 	-- reset everything
 	entities,new_entities={},{}
 	player=spawn_entity("player",{x=10*3+5,y=8*2+4})
-	player=spawn_entity("heart",{x=10*4+5,y=8*3+4})
-	player=spawn_entity("magic_tile",{x=10*2+5,y=8*4+4})
-	player=spawn_entity("magic_tile",{x=10*3+5,y=8*4+4})
-	player=spawn_entity("magic_tile",{x=10*4+5,y=8*4+4})
 	player_health=spawn_entity("player_health")
+	boss=spawn_entity("magic_mirror")
 	boss_health=spawn_entity("boss_health")
+	if speed_mode then
+		boss.visible=true
+		boss_health.visible=true
+		boss:intro():and_then("decide_next_action")
+	elseif training_mode then
+		spawn_entity("instructions")
+	else
+		spawn_magic_tile(50)
+	end
 	-- create tiles
 	create_tiles(levels[1])
 	-- immediately add new entities to the game
@@ -1013,11 +1316,6 @@ function update_game()
 	-- update entities
 	local entity
 	for entity in all(entities) do
-		-- update the entity's schedule
-		local i
-		for i=1,#entity.scheduled do
-			entity.scheduled[i][1]-=1
-		end
 		-- call the entity's update function
 		entity:update()
 		-- do some default update stuff
@@ -1102,19 +1400,23 @@ function draw_game()
 	palt(3,true)
 	camera(shake_x)
 	rectfill(0,0,127,10,0)
-	sspr(117,6,11,7,6,2)
-	print("4",8,3,0)
-	color(1)
-	print("25700",101,3,1)
+	if false then
+		sspr(117,6,11,7,6,2)
+		print("4",8,3,0)
+		color(1)
+		print("25700",101,3,1)
+	end
 	-- draw bottom ui
 	rectfill(0,0+118,127,128,0)
-	sspr(112,6,5,5,7,120)
-	sspr(109,6,3,3,14,121)
-	print("3",19,120,1)
-	print("17",103,120)
-	print("03",113,120)
-	pset(111,121)
-	pset(111,123)
+	if false then
+		sspr(112,6,5,5,7,120)
+		sspr(109,6,3,3,14,121)
+		print("3",19,120,1)
+		print("17",103,120)
+		print("03",113,120)
+		pset(111,121)
+		pset(111,123)
+	end
 	-- draw ui entities (render_layer>=10)
 	while i<=#entities do
 		pal()
@@ -1206,8 +1508,6 @@ function spawn_entity(class_name,args,skip_init)
 			hitbox_channel=0,
 			hurtbox_channel=0,
 			invincibility_frames=0,
-			-- schedule props
-			scheduled={},
 			-- spatial props
 			x=0,
 			y=0,
@@ -1219,7 +1519,6 @@ function spawn_entity(class_name,args,skip_init)
 			add_to_game=noop,
 			init=noop,
 			update=function(self)
-				self:check_schedule()
 				self:apply_velocity()
 			end,
 			draw=noop,
@@ -1248,39 +1547,15 @@ function spawn_entity(class_name,args,skip_init)
 			on_hurt=function(self)
 				self:die()
 			end,
-			-- schedule methods
-			schedule=function(self,time,fn,...)
-				local args={...}
-				add(self.scheduled,{time,fn,args})
-			end,
-			check_schedule=function(self)
-				local i
-				local num_deleted=0
-				local list=self.scheduled
-				local to_call={}
-				for i=1,#list do
-					local item=list[i]
-					if item[1]<=0 then
-						add(to_call,item[2])
-						add(to_call,item[3] or {})
-						list[i]=nil
-						num_deleted+=1
-					else
-						list[i-num_deleted],list[i]=item,nil
-					end
+			promise=function(self,ctx,...)
+				local p
+				if type(ctx)=="table" then
+					p=make_promise(ctx,...)
+				else
+					p=make_promise(self,ctx,...)
 				end
-				for i=1,#to_call,2 do
-					local fn=to_call[i]
-					local args=to_call[i+1]
-					if type(fn)=="function" then
-						fn(self,unpack(args))
-					else
-						self[fn](self,unpack(args))
-					end
-				end
-			end,
-			clear_schedule=function(self)
-				self.scheduled={}
+				p:start()
+				return p
 			end
 		}
 	end
@@ -1378,7 +1653,126 @@ function ease_in_out(percent)
 	end
 end
 
+-- example make_promise calls:
+--   make_promise(self)
+--   make_promise(self,12)
+--   make_promise(self,function() ... end,5)
+--   make_promise(self,"change_pose",5)
+function make_promise(ctx,fn,...)
+	local args={...}
+	return {
+		ctx=ctx,
+		started=false,
+		finished=false,
+		frames_to_finish=nil,
+		and_thens={},
+		start=function(self)
+			if not self.started then
+				-- call callback (if there is one) and get the frames left
+				local f
+				self.started=true
+				if type(fn)=="number" then
+					f=fn
+				elseif type(fn)=="string" then
+					f=self.ctx[fn](self.ctx,unpack(args))
+				elseif type(fn)=="function" then
+					f=fn(unpack(args))
+				end
+				-- the result of the fn call was a promise, when it's done, finish this promise
+				if type(f)=="table" then
+					f:and_then(function()
+						self:finish()
+					end)
+				-- wait a certain number of frames
+				elseif f and f>0 then
+					self.frames_to_finish=f
+					add(promises,self)
+				-- or just finish immediately if there's no need to wait
+				else
+					self:finish()
+				end
+			end
+		end,
+		finish=function(self)
+			if not self.finished then
+				self.finished=true
+				local i
+				for i=1,#self.and_thens do
+					self.and_thens[i]:start()
+				end
+				self.and_thens=nil
+			end
+		end,
+		update=function(self)
+			if self.started and not self.finished and self.frames_to_finish and decrement_counter_prop(self,"frames_to_finish") then
+				self:finish()
+			end
+		end,
+		and_then=function(self,ctx,...)
+			-- example calls:
+			--   :and_then(5)
+			--   :and_then("change_pose",5)
+			--   :and_then(function() ... end)
+			--   :and_then(some_other_ctx,"change_expression",4)
+			local p
+			if type(ctx)=="table" then
+				p=make_promise(ctx,...)
+			else
+				p=make_promise(self.ctx,ctx,...)
+			end
+			if self.finished then
+				p:start()
+			else
+				add(self.and_thens,p)
+			end
+			return p
+		end
+	}
+end
+
+function all_promises(ctx,...)
+	local promise=make_promise(ctx)
+	local num_finished=0
+	local i
+	local promises={...}
+	for i=1,#promises do
+		promises[i]:and_then(function()
+			num_finished+=1
+			if num_finished==#promises then
+				promise:finish()
+			end
+		end)
+	end
+	return promise
+end
+
 -- helper functions
+function spawn_magic_tile(frames_to_death)
+	spawn_entity("magic_tile_spawn",{
+		x=10*rnd_int(1,8)-5,
+		y=8*rnd_int(1,5)-4,
+		frames_to_death=frames_to_death	
+	})
+end
+
+function make_sparks(x,y,vx,vy,num_sparks,color,speed_percent)
+	local i
+	for i=1,num_sparks do
+		local angle=360*((i+rnd(0.7))/num_sparks)--rnd_int(0,360)
+		local speed=speed_percent*rnd_int(7,15)
+		local cos_angle=cos(angle/360)
+		local sin_angle=sin(angle/360)
+		spawn_entity("spark",{
+			x=x+5*cos_angle,
+			y=y+5*sin_angle,
+			vx=speed*cos_angle+vx,
+			vy=speed*sin_angle+vy,
+			color=color,
+			frames_to_death=rnd_int(13,19)
+		})
+	end
+end
+
 function debug_log(log,print_instead)
 	if print_instead then
 		color(8)
@@ -1544,36 +1938,36 @@ scenes={
 
 
 __gfx__
-3ccccc33cc33333333333333cccc333333ccccc33333933cc3333333333333330000000000000000000000000000000000000000000000000000000000000000
-cccccccccccccccc0330000cccccc3000ccccccc30008dccccc33000000000030000000000000000000000000000000000000000000000000000000000000000
-cccc1c1cccc1111c1c3000ccc11c13000cccc1c130000cccccc33000c11cccc30000000000000000000000000000000000000000000000000000000000000000
-cdcc1c1cddd1111c1c30cddcc11c13000dccc1c13000dcc1c1cc30ccc11111cc0000000000000000000000000000000000000000000000000000000000000000
-cccccccccccccccccc300cccccccc3000ccccccc300ddcc1c1cc3dccddcccccc0000000000000000000000000000000000000000000000000000000000000000
-ddcccccddcdddd00033000ddccddc3000ddcccdc3000ddccccc3dddccccccdd30000000000000000000000000000000000000000000000000000000000000000
-ddddddddddd0000003300ddddddd3300dddddddd30000ddcccd3dddddddd0003000000000000000000000000000000000000000000000131ddddd31111111113
-3d333d33d33333333333333333d33333333333d3333333d33398333333d33333000000000000000000000000000000000000000000000313d0d0d11111111111
-3ccccc33333333c33333333ccccc333333ccccc33333ccccc333333333333333000000000000000000000000000000000000000000000131d0d0d11111101011
-ccccccc300000ccc0330000ccccc33000ccccccc390ccccccc093000000000030000000000000000000000000000000000000000000000005ddd511111110111
-ccccccc300000ccc033000ccccccc3000ccccccc30dcccccccd330d0000000d3000000000000000000000000000000000000000000000000ddddd11111101011
-dcccccd300000ccc033000ccccccc3000dcccccd380cdddddc0830dcccccccd30000000000000000000000000000000000000000000000000000011111111111
-ccccccc30000ccccc33000dcccccd3000ccccccc300ddddddd0330dcccccccd30000000000000000000000000000000000000000000000000000031111111113
-cdddddc30000dcccd33000dcdddcd3000cdddddc300ddddddd0330cdddddddc30000000000000000000000000000000000000000000000000000000000000000
-ddddddd30000dcccd33000ddddddd3000ddddddd3000ddddd00330ddddddddd30000000000000000000000000000000000000000000000000000000000000000
-3d000d330000cdddc33000ddddddd30000000d0330000d000003300ddddddd030000000000000000000000000000000000000000000000000000000000000000
-30000033000ddddddd3000000ddd3300000000033000000000033000000000030000000000000000000000000000000000000000000000000000000000000000
-30000033000ddddddd30000000d03300000000033000000000033000000000030000000000000000000000000000000000000000000000000000000000000000
-333333333333d333d333333333d33333333333333333333333333333333333330000000000000000000000000000000000000000000000000000000000000000
-333333333333ccccc333333333333333333333333333333333333333333333333333333333300000000000000000000000000000000000000000000000000000
-30000033000ccccccc3000000c003300000000033000000000033000000000030000c00000300000000000000000000000000000000000000000000000000000
-30000033000cc1c1cc300000cc0c3300000000033000000000033000000000030000c0c000300000000000000000000000000000000000000000000000000000
-3ccccc330000c1c1c330000ccccc330000ccccc330000000000330000ccc0003000ccccc00300000000000000000000000000000000000000000000000000000
-ccccccc30000c1c1d33000cc1c1cc3000ccccccc3000ccccc0033000c1c1c003d0ccccccc0300000000000000000000000000000000000000000000000000000
-cc1c1cc30000c1c1d33000cc1c1cd3000cc1c1cc390ccccccc083000c1c1c0030dcccc11c0d00000000000000000000000000000000000000000000000000000
-dc1c1cd30000d1c1d33000cd1c1cd3000cc1c1cd30dcccccccd330ddc1c1cd030ccc1c11cd300000000000000000000000000000000000000000000000000000
-ccccccc30000ddccc33000ddccccc3000cdccccc380ccccccc0930dcc1c1cdd3000ccccccc300000000000000000000000000000000000000000000000000000
-dcccccd300000ddd033000dcccccc3000dcccccc300cc1c1cc0330ccc1c1ccd30dcccccc00300000000000000000000000000000000000000000000000000000
-ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc300ddddddd0300000000000000000000000000000000000000000000000000000
-3d333d33333333d33333333d3333333333d333333333ccccc3333333dddddd33333d333d33300000000000000000000000000000000000000000000000000000
+3ccccc33cc33333333333333cccc333333ccccc33333933cc3333333333333333333333cc3333333333333330000000000000000000000000000000000000000
+cccccccccccccccc0330000cccccc3000ccccccc30008dccccc3300000000003300000cccc0330000c0000030000000000000000000000000000000000000000
+cccc1c1cccc1111c1c3000ccc11c13000cccc1c130000cccccc33000c11cccc3300000cccc0330000c0c00030000000000000000000000000000000000000000
+cdcc1c1cddd1111c1c30cddcc11c13000dccc1c13000dcc1c1cc30ccc11111cc300000cc1c033000ccccc0030000000000000000000000000000000000000000
+cccccccccccccccccc300cccccccc3000ccccccc300ddcc1c1cc3dccddcccccc300000cc1c033d0ccccccc030000000000000000000000000000000000000000
+ddcccccddcdddd00033000ddccddc3000ddcccdc3000ddccccc3dddccccccdd3300000dccc0330dcccc11c0d0000000000000000000000000000000000000000
+ddddddddddd0000003300ddddddd3300dddddddd30000ddcccd3dddddddd0003300000ddcc0330ccc1c11cd3000000000000000000000131ddddd31111111113
+3d333d33d33333333333333333d33333333333d3333333d33398333333d333333333333dd3333000ccccccc3000000000000000000000313d0d0d11111111111
+3ccccc33333333c33333333ccccc333333ccccc33333ccccc33333333333333333333333333330dcccccc003000000000000000000000131d0d0d11111101011
+ccccccc300000ccc0330000ccccc33000ccccccc390ccccccc09300000000003300ccccccc03300ddddddd030000000000000000000000005ddd511111110111
+ccccccc300000ccc033000ccccccc3000ccccccc30dcccccccd330d0000000d330ccccccccc33333d333d333000000000000000000000000ddddd11111101011
+dcccccd300000ccc033000ccccccc3000dcccccd380cdddddc0830dcccccccd330ccdddddcc30000000000000000000000000000000000000000011111111111
+ccccccc30000ccccc33000dcccccd3000ccccccc300ddddddd0330dcccccccd3300ddddddd030000000000000000000000000000000000000000031111111113
+cdddddc30000dcccd33000dcdddcd3000cdddddc300ddddddd0330cdddddddc33000000000030000000000000000000000000000000000000000000000000000
+ddddddd30000dcccd33000ddddddd3000ddddddd3000ddddd00330ddddddddd33000000000030000000000000000000000000000000000000000000000000000
+3d000d330000cdddc33000ddddddd30000000d0330000d000003300ddddddd033000000000030000000000000000000000000000000000000000000000000000
+30000033000ddddddd3000000ddd3300000000033000000000033000000000033000000000030000000000000000000000000000000000000000000000000000
+30000033000ddddddd30000000d03300000000033000000000033000000000033000000000030000000000000000000000000000000000000000000000000000
+333333333333d333d333333333d33333333333333333333333333333333333333333333333330000000000000000000000000000000000000000000000000000
+333333333333ccccc333333333333333333333333333333333333333333333333333333333330000000000000000000000000000000000000000000000000000
+30000033000ccccccc3000000c003300000000033000000000033000000000033000000000030000000000000000000000000000000000000000000000000000
+30000033000cc1c1cc300000cc0c3300000000033000000000033000000000033000000000030000000000000000000000000000000000000000000000000000
+3ccccc330000c1c1c330000ccccc330000ccccc330000000000330000ccc00033000000000030000000000000000000000000000000000000000000000000000
+ccccccc30000c1c1d33000cc1c1cc3000ccccccc3000ccccc0033000c1c1c0033000000000030000000000000000000000000000000000000000000000000000
+cc1c1cc30000c1c1d33000cc1c1cd3000cc1c1cc390ccccccc083000c1c1c0033000000000030000000000000000000000000000000000000000000000000000
+dc1c1cd30000d1c1d33000cd1c1cd3000cc1c1cd30dcccccccd330ddc1c1cd033000000000030000000000000000000000000000000000000000000000000000
+ccccccc30000ddccc33000ddccccc3000cdccccc380ccccccc0930dcc1c1cdd3300ccccccc030000000000000000000000000000000000000000000000000000
+dcccccd300000ddd033000dcccccc3000dcccccc300cc1c1cc0330ccc1c1ccd330ccccccccc30000000000000000000000000000000000000000000000000000
+ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc330dc11c11cd30000000000000000000000000000000000000000000000000000
+3d333d33333333d33333333d3333333333d333333333ccccc3333333dddddd33333dcccccd330000000000000000000000000000000000000000000000000000
 33333333333333333383333333883333333833333333333333333338833333300000000000000000000000000000000000000000000000000000000000000000
 30550550330550550338880888330880880330880880330088800388880588300000000000000000000000000000000000000000000000000000000000000000
 35005005335005005338888ee8338888ee8338888ee83308888e03888050ee800000000000000000000000000000000000000000000000000000000000000000
@@ -1581,33 +1975,6 @@ ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc300ddddddd0300000
 30500050330588850330888880330888880330888880330888880330800088300000000000000000000000000000000000000000000000000000000000000000
 30050500330058500330888880330088800330088800330088800330050880300000000000000000000000000000000000000000000000000000000000000000
 33335333333335333338338338338338338333338333333338333333335833300000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 33333333333333333333333333333333333377733333333333333733333333330000000000000000000000000000000000000000000000000000000000000000
 30000000000000033000777000000003300077700000000330000000070000030000000000000000000000000000000000000000000000000000000000000000
 30000000000000033007777000000003300700007700000330000000000000070000000000000000000000000000000000000000000000000000000000000000
@@ -1621,8 +1988,35 @@ ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc300ddddddd0300000
 30077777707770033077000777770773777000000000007730000000000000030000000000000000000000000000000000000000000000000000000000000000
 30007777000000037777700000000773777000000000070330000000000000030000000000000000000000000000000000000000000000000000000000000000
 30007770000000037777700770000773307070770000000330000000000000030000000000000000000000000000000000000000000000000000000000000000
-30000000000000033770000770000003300000770000000330000000000000030000000000000000000000000000000000000000000000000000000000000000
-33333333333333333333333333333333333333333333333333333333333333330000000000000000000000000000000000000000000000000000000000000000
+33333333333333333773333773333333333333333333333333333333333333330000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
