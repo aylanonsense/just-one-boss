@@ -55,44 +55,35 @@ local new_entities
 local entity_classes={
 	instructions={
 		x=40,
-		y=-25,
-		up_pressed=false,
-		down_pressed=false,
-		left_pressed=false,
-		right_pressed=false,
-		button_presses=0,
+		y=-29,
+		button_presses={},
+		num_buttons_pressed=0,
 		update=function(self)
-			self:check_button_press("up",2)
-			self:check_button_press("down",3)
-			self:check_button_press("left",0)
-			self:check_button_press("right",1)
+			local i
+			for i=0,3 do
+				if btn(i) and not self.button_presses[i] then
+					self.num_buttons_pressed+=1
+					self.frames_to_death,self.button_presses[i]=240-45*self.num_buttons_pressed,true
+				end
+			end
 		end,
 		draw=function(self)
-			local fade=4
+			local x,y,fade=self.x,self.y,0
 			if self.frames_to_death>0 then
-				fade=mid(6,6-flr(self.frames_to_death/15),4)
+				fade=min(0,flr(self.frames_to_death/15)-3)
 			end
-			color(color_ramps[6][fade])
-			print("press",self.x-9,self.y-18)
-			print("to move",self.x-13,self.y+14)
-			print("”",self.x-3,self.y-9,self:choose_color("up",fade))
-			print("‹",self.x-11,self.y-2,self:choose_color("left",fade))
-			print("‘",self.x+5,self.y-2,self:choose_color("right",fade))
-			print("ƒ",self.x-3,self.y+5,self:choose_color("down",fade))
+			print("press",x-9,y-18,get_color(6,fade))
+			print("to move",x-13,y+16)
+			print("”",x-3,y-9,self:choose_color(2,fade)) -- up
+			print("‹",x-13,y-1,self:choose_color(0,fade)) -- left
+			print("‘",x+7,y-1,self:choose_color(1,fade)) -- right
+			print("ƒ",x-3,y+7,self:choose_color(3,fade)) -- down
+		end,
+		choose_color=function(self,dir,fade)
+			return get_color(ternary(self.button_presses[dir],6,13),fade)
 		end,
 		on_death=function(self)
 			spawn_magic_tile(50)
-		end,
-		check_button_press=function(self,dir,index)
-			if btn(index) and not self[dir.."_pressed"] then
-				self[dir.."_pressed"]=true
-				self.button_presses+=1
-				self.frames_to_death=45*(5-self.button_presses)
-			end
-		end,
-		choose_color=function(self,dir,fade)
-			local color=ternary(self[dir.."_pressed"],12,6)
-			return color_ramps[color][fade]
 		end
 	},
 	movable={
@@ -256,40 +247,20 @@ local entity_classes={
 			end
 		end,
 		on_hurt=function(self)
-			shake_screen(4,12)
+			freeze_and_shake_screen(4,12)
 			self.invincibility_frames=60
 			self.stun_frames=19
-			-- player_health:lose_heart()
+			player_health:lose_heart()
 		end
 	},
 	player_health={
+		x=63,
+		y=122,
 		visible=false,
 		hearts=3,
 		anim=nil,
 		anim_frames=0,
-		x=63,
-		y=122,
 		is_user_interface=true,
-		update_priority=0,
-		gain_heart=function(self)
-			if self.hearts<4 then
-				self.hearts+=1
-				self.anim="gain"
-				self.anim_frames=10
-			end
-		end,
-		lose_heart=function(self)
-			if self.hearts>0 then
-				self.hearts-=1
-				self.anim="lose"
-				self.anim_frames=20
-			end
-			if self.visible then
-				self.visible=false
-				freeze_frames=20
-			end
-			return self.hearts<=0
-		end,
 		update=function(self)
 			if decrement_counter_prop(self,"anim_frames") then
 				self.anim=nil
@@ -297,7 +268,7 @@ local entity_classes={
 		end,
 		draw=function(self)
 			if self.visible then
-				palt(3,true)
+				pal2(3)
 				local i
 				for i=1,4 do
 					local sprite
@@ -316,40 +287,32 @@ local entity_classes={
 					end
 				end
 			end
+		end,
+		gain_heart=function(self)
+			if self.hearts<4 then
+				self.hearts+=1
+				self.anim,self.anim_frames="gain",10
+			end
+		end,
+		lose_heart=function(self)
+			if self.hearts>0 then
+				self.hearts-=1
+				self.anim,self.anim_frames="lose",20
+			end
+			if self.visible then
+				self.visible=false
+				freeze_and_shake_screen(20,0)
+			end
 		end
 	},
 	boss_health={
+		x=63,
+		y=5,
 		visible=false,
 		health=0,
 		visible_health=0,
 		rainbow_frames=0,
-		phase=0,
-		x=63,
-		y=5,
 		is_user_interface=true,
-		update_priority=0,
-		gain_health=function(self,health)
-			self.health=mid(0,self.health+health,60)
-			self.rainbow_frames=15+(self.health-self.visible_health)
-			if self.phase==0 then
-				if self.health>=20 and not self.visible then
-					self.visible=true
-				end
-				if self.health>=40 then
-					boss.rainbow_frames=self.rainbow_frames
-				end
-				if self.health>=50 and not boss.visible then
-					boss.visible=true
-				end
-				if self.health>=60 then
-					-- boss:schedule(55,"intro")
-				end
-			end
-		end,
-		next_phase=function(self)
-			self.phase+=1
-			self.health=0
-		end,
 		update=function(self)
 			if self.visible_health<self.health then
 				self.visible_health+=1
@@ -361,12 +324,17 @@ local entity_classes={
 		end,
 		draw=function(self)
 			if self.visible then
+				local x,y=self.x,self.y
 				if self.rainbow_frames>0 then
 					pal2(5,16)
 				end
-				rect(self.x-30,self.y-3,self.x+30,self.y+3,5)
-				rectfill(self.x-30,self.y-3,self.x+mid(-30,-31+self.visible_health,29),self.y+3,5)
+				rect(x-30,y-3,x+30,y+3,5)
+				rectfill(x-30,y-3,x+mid(-30,-31+self.visible_health,29),y+3,5)
 			end
+		end,
+		gain_health=function(self,health)
+			self.health=mid(0,self.health+health,60)
+			self.rainbow_frames=15+(self.health-self.visible_health)
 		end
 	},
 	magic_tile_spawn={
@@ -378,7 +346,7 @@ local entity_classes={
 			end
 		end,
 		on_death=function(self)
-			shake_screen(0,1)
+			freeze_and_shake_screen(0,1)
 			spawn_entity("magic_tile",self.x,self.y)
 			spawn_particle_burst(self.x,self.y,4,16,4)
 		end
@@ -398,10 +366,10 @@ local entity_classes={
 			rect(x-2,y-1,x+2,y+1)
 		end,
 		on_hurt=function(self)
-			shake_screen(2,3)
+			freeze_and_shake_screen(2,3)
 			self.hurtbox_channel,self.frames_to_death=0,6
 			spawn_particle_burst(self.x,self.y,30,16,10)
-			-- boss_health:gain_health(10)
+			boss_health:gain_health(10)
 			-- if boss_health.health<60 then
 			-- 	spawn_magic_tile(100-min(self.frames_alive,30)) -- 30 frame grace period
 			-- end
@@ -416,6 +384,10 @@ local entity_classes={
 		update=function(self)
 			self:copy_player()
 		end,
+		on_hurt=function(self,entity)
+			player:on_hurt(entity)
+			self:copy_player()
+		end,
 		copy_player=function(self)
 			local mirrored_directions={
 				left="right",
@@ -426,17 +398,12 @@ local entity_classes={
 			self.x=80-player.x
 			self.y=player.y
 			self.facing=mirrored_directions[player.facing]
-			self.move_dir=ternary(player.move_dir,mirrored_directions[player.move_dir],nil)
-			self.move_frames=player.move_frames
-			self.teeter_frames=player.teeter_frames
+			self.step_frames=player.step_frames
 			self.stun_frames=player.stun_frames
+			self.teeter_frames=player.teeter_frames
 			self.invincibility_frames=player.invincibility_frames
 			self.frames_alive=player.frames_alive
-		end,
-		on_hurt=function(self,entity)
-			player:on_hurt(entity)
-			self:copy_player()
-		end,
+		end
 	},
 	playing_card={
 		-- vx,is_red
@@ -525,18 +492,17 @@ local entity_classes={
 		extends="movable",
 		x=40,
 		y=-28,
-		-- rainbow_frames=0,
 		expression=4,
 		laser_charge_frames=0,
 		laser_preview_frames=0,
 		hover_frames=0,
 		hover_dir=1,
+		visible=false,
 		init=function(self)
 			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,self.y+5)
 			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,self.y+5,{is_right_hand=true,dir=1})
 		end,
 		update=function(self)
-			-- decrement_counter_prop(self,"rainbow_frames")
 			decrement_counter_prop(self,"laser_charge_frames")
 			decrement_counter_prop(self,"laser_preview_frames")
 			if decrement_counter_prop(self,"hover_frames") then
@@ -569,19 +535,33 @@ local entity_classes={
 		draw=function(self)
 			local x,y=self.x,self.y
 			pal2(3)
-			-- draw mirror
-			sspr2(115,84,13,30,self.x-6,self.y-12)
-			-- draw face
-			if self.expression>0 then
-				sspr2(51+11*self.expression,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
+			if self.visible then
+				-- draw mirror
+				sspr2(115,84,13,30,self.x-6,self.y-12)
+				-- draw face
+				if self.expression>0 then
+					sspr2(51+11*self.expression,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
+				end
 			end
-			-- draw top hat
-			if self.is_wearing_top_hat then
-				sspr2(115,75,13,9,x-6,y-15)
+			if boss_health.rainbow_frames>0 then
+				local i
+				for i=1,15 do
+					pal2(i,16)
+				end
+				pal2(3)
+				sspr2(62,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
+				pal()
+				pal2(3)
 			end
-			-- draw laser preview
-			if self.laser_preview_frames%2>0 then
-				line(x,y+7,x,60,14)
+			if self.visible then
+				-- draw top hat
+				if self.is_wearing_top_hat then
+					sspr2(115,75,13,9,x-6,y-15)
+				end
+				-- draw laser preview
+				if self.laser_preview_frames%2>0 then
+					line(x,y+7,x,60,14)
+				end
 			end
 		end,
 		-- highest-level commands
@@ -905,8 +885,9 @@ local entity_classes={
 		end,
 		on_hurt=function(self)
 			freeze_frames=2
-			-- player_health:gain_heart()
+			player_health:gain_heart()
 			-- spawn_particle_burst(todo)
+			spawn_particle_burst(self.x,self.y,6,8,4)
 			self:die()
 		end
 	},
@@ -968,10 +949,10 @@ function _draw()
 	-- call the draw function of the current scene
 	scene[3]()
 	-- draw debug info
-	camera()
-	print("mem:      "..flr(100*(stat(0)/1024)).."%",2,109,ternary(stat(1)>=1024,8,2))
-	print("cpu:      "..flr(100*stat(1)).."%",2,116,ternary(stat(1)>=1,8,2))
-	print("entities: "..#entities,2,123,ternary(#entities>50,8,2))
+	-- camera()
+	-- print("mem:      "..flr(100*(stat(0)/1024)).."%",2,109,ternary(stat(1)>=1024,8,2))
+	-- print("cpu:      "..flr(100*stat(1)).."%",2,116,ternary(stat(1)>=1,8,2))
+	-- print("entities: "..#entities,2,123,ternary(#entities>50,8,2))
 end
 
 
@@ -985,11 +966,27 @@ function init_game()
 	player_health=spawn_entity("player_health")
 	boss=spawn_entity("magic_mirror")
 	boss_health=spawn_entity("boss_health")
-	heart=spawn_entity("heart",45,4)
-	spawn_magic_tile()
+	-- start the slow intro to the game
+	spawn_entity("instructions")
+	-- if self.phase==0 then
+	-- 	if self.health>=20 and not self.visible then
+	-- 		self.visible=true
+	-- 	end
+	-- 	if self.health>=40 then
+	-- 		boss.rainbow_frames=self.rainbow_frames
+	-- 	end
+	-- 	if self.health>=50 and not boss.visible then
+	-- 		boss.visible=true
+	-- 	end
+	-- 	if self.health>=60 then
+	-- 		-- boss:schedule(55,"intro")
+	-- 	end
+	-- end
+	-- spawn_magic_tile()
 	-- get to the good part
-	boss.visible=true
-	boss_health.visible=true
+	-- boss.visible=true
+	-- player_health.visible=true
+	-- boss_health.visible=true
 	-- boss:intro():and_then("decide_next_action")
 	-- immediately add new entities to the game
 	add_new_entities()
@@ -1118,16 +1115,18 @@ function draw_ui()
 	-- draw black boxes
 	rectfill(0,0,127,10,0)
 	rectfill(0,118,127,128)
-	-- draw score multiplier
-	sspr2(117,0,11,7,6,2)
-	print("4",8,3,0)
-	-- draw score
-	print("25700",101,3,1)
-	-- draw lives
-	sspr2(118,7,10,5,7,120)
-	print("3",19,120)
-	-- draw timer
-	print("17:03",101,120)
+	if false then
+		-- draw score multiplier
+		sspr2(117,0,11,7,6,2)
+		print("4",8,3,0)
+		-- draw score
+		print("25700",101,3,1)
+		-- draw lives
+		sspr2(118,7,10,5,7,120)
+		print("3",19,120)
+		-- draw timer
+		print("17:03",101,120)
+	end
 	-- draw ui entities
 	pal()
 	foreach(entities,function(entity)
@@ -1352,7 +1351,7 @@ end
 -- end
 
 function spawn_magic_tile(frames_to_death)
-	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{frames_to_death=max(1,frames_to_death)})
+	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{frames_to_death=max(10,frames_to_death)})
 end
 
 function spawn_particle_burst(x,y,num_particles,color,speed)
@@ -1413,8 +1412,8 @@ function ease_in_out(percent)
 end
 
 -- helper functions
-function shake_screen(freeze,shake)
-	freeze_frames=freeze
+function freeze_and_shake_screen(freeze,shake)
+	freeze_frames=max(freeze,freeze_frames)
 	screen_shake_frames=max(shake,screen_shake_frames)
 end
 
@@ -1553,9 +1552,9 @@ __gfx__
 3000000000330cc1c1cc033000cc0c00330000000003300000000033000000000330000000003000000000000000000000000000000000000000000000000000
 300ccccc003300c1c1c003300ccccc003300ccccc003300000000033000ccc000330000000003000000000000000000000000000000000000000000000000000
 30ccccccc03300c1c1d00330cc1c1cc0330ccccccc03300ccccc003300c1c1c00330000000003000000000000000000000000000000000000000000000000000
-30cc1c1cc03300c1c1d00330cc1c1cd0330cc1c1cc0390ccccccc08300c1c1c00330000000003000000000000000000000000000000000000000000000000000
+30cc1c1cc03300c1c1d00330cc1c1cd0330cc1c1cc0390ccccccc09300c1c1c00330000000003000000000000000000000000000000000000000000000000000
 30dc1c1cd03300d1c1d00330cd1c1cd0330cc1c1cd033dcccccccd33ddc1c1cd0330000000003000000000000000000000000000000000000000000000000000
-30ccccccc03300ddccc00330ddccccc0330cdccccc0380ccccccc093dcc1c1cdd330ccccccc03000000000000000000000000000000000000000000000000000
+30ccccccc03300ddccc00330ddccccc0330cdccccc0380ccccccc083dcc1c1cdd330ccccccc03000000000000000000000000000000000000000000000000000
 30dcccccd033000ddd000330dcccccc0330dcccccc0330cc1c1cc033ccc1c1ccd33ccccccccc3000000000000000000000000000000000000000000000000000
 30ddddddd033000ddd000330ddddddd0330ddddddd0330cc1c1cc033ccc1c1ccc33dc11c11cd3000000000000000000000000000000000000000000000000000
 333d333d33333333d33333333d3333333333d3333333333ccccc333333dddddd3333dcccccd33000000000000000000000000000000000000000000000000000
