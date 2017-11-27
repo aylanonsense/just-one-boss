@@ -25,10 +25,6 @@ symbols:
 	down:	ƒ
 	left:	‹
 	right:	‘
-
-starting symbols: 6838
-after a bit of work: 6206
-after more work: 5305
 ]]
 
 -- useful noop function
@@ -137,16 +133,10 @@ local entity_classes={
 		end
 	},
 	player={
-		hitbox_channel=2,
-		hurtbox_channel=1,
+		hitbox_channel=2, -- pickup
+		hurtbox_channel=1, -- player
 		facing="right",
-		move_dir=nil,
-		next_move_dir=nil,
-		move_frames=0,
-		prev_col=nil,
-		prev_row=nil,
-		horizontal_move_increments={1,2,3,4},
-		vertical_move_increments={1,2,2,3},
+		step_frames=0,
 		teeter_frames=0,
 		stun_frames=0,
 		primary_color=12,
@@ -154,136 +144,122 @@ local entity_classes={
 		eye_color=0,
 		update=function(self)
 			decrement_counter_prop(self,"stun_frames")
-			if decrement_counter_prop(self,"teeter_frames") and self.next_move_dir then
-				self:move(self.next_move_dir)
-				self.next_move_dir=nil
-			end
+			decrement_counter_prop(self,"teeter_frames")
 			-- try moving
 			if btnp(0) then
-				self:queue_move("left")
+				self:queue_step("left")
 			elseif btnp(1) then
-				self:queue_move("right")
+				self:queue_step("right")
 			elseif btnp(2) then
-				self:queue_move("up")
+				self:queue_step("up")
 			elseif btnp(3) then
-				self:queue_move("down")
+				self:queue_step("down")
+			end
+			-- apply moves that were delayed from teetering/stun
+			if self.next_step_dir and not self.step_dir then
+				self:step(self.next_step_dir)
 			end
 			-- actually move
-			self.vx=0
-			self.vy=0
-			if self.stun_frames<=0 and self.teeter_frames<=0 and self.move_frames>0 then
-				if self:step() then
-					self.move_dir=nil
-					if self.next_move_dir then
-						self:move(self.next_move_dir)
-						self.next_move_dir=nil
-						self:step()
+			if self.stun_frames<=0 then
+				self.vx=0
+				self.vy=0
+				self:apply_step()
+				local prev_col,prev_row=self:col(),self:row()
+				self:apply_velocity()
+				-- teeter off the edge of the earth if the player tries to move off the map
+				if self:col()!=mid(1,self:col(),8) or self:row()!=mid(1,self:row(),5) then
+					self.x=10*prev_col-5
+					self.y=8*prev_row-4
+					self.step_dir=nil
+					self.next_step_dir=nil
+					self.step_frames=0
+					self.teeter_frames=11
+				end
+			end
+		end,
+		draw=function(self)
+			local spritesheet_x,spritesheet_y,spritesheet_height,dx,dy,facing=0,0,8,7,6,self.facing
+			local flipped=(facing=="left")
+			-- up/down sprites are below the left/right sprites in the spritesheet
+			if facing=="up" then
+				spritesheet_y,spritesheet_height,dx=8,11,5
+			elseif facing=="down" then
+				spritesheet_y,spritesheet_height,dx,dy=19,11,5,9
+			elseif facing=="left" then
+				dx=3
+			end
+			-- moving between tiles
+			if self.step_frames>0 then
+				spritesheet_x=44-11*self.step_frames
+			end
+			-- teetering off the edge
+			if self.teeter_frames>0 then
+				local c=ternary(self.teeter_frames%4<2,8,9)
+				pal2(c,0)
+				pal2(17-c,self.secondary_color)
+				spritesheet_x=44
+				if facing=="up" then
+					dy+=3
+				elseif facing=="down" then
+					dy-=2
+				elseif facing=="left" then
+					dx+=4
+				elseif facing=="right" then
+					dx-=4
+				end
+			end
+			-- getting hurt
+			if self.stun_frames>0 then
+				spritesheet_x,spritesheet_y,spritesheet_height,dx,dy=77,0,10,5,8
+				flipped=self.stun_frames%6>3
+			end
+			-- draw the sprite
+			pal2(3)
+			pal2(12,self.primary_color)
+			pal2(13,self.secondary_color)
+			pal(1,self.eye_color)
+			if self.invincibility_frames%4<2 or self.stun_frames>0 then
+				sspr2(spritesheet_x,spritesheet_y,11,spritesheet_height,self.x-dx,self.y-dy,flipped)
+			end
+		end,
+		queue_step=function(self,dir)
+			if not self:step(dir) then
+				self.next_step_dir=dir
+			end
+		end,
+		step=function(self,dir)
+			if not self.step_dir and self.teeter_frames<=0 and self.stun_frames<=0 then
+				self.facing,self.step_dir,self.step_frames,self.next_step_dir=dir,dir,4 -- ,nil
+				return true
+			end
+		end,
+		apply_step=function(self)
+			local dir,dist=self.step_dir,self.step_frames
+			if dir then
+				local dist_vertical=ternary(dist>2,dist-1,dist)
+				if dir=="left" then
+					self.vx-=dist
+				elseif dir=="right" then
+					self.vx+=dist
+				elseif dir=="up" then
+					self.vy-=dist_vertical
+				elseif dir=="down" then
+					self.vy+=dist_vertical
+				end
+				if decrement_counter_prop(self,"step_frames") then
+					self.step_dir=nil
+					if self.next_step_dir then
+						self:step(self.next_step_dir)
+						self:apply_step()
 					end
 				end
 			end
-			self.prev_col=self:col()
-			self.prev_row=self:row()
-			self:apply_velocity()
-			if not tile_exists(self:col(),self:row()) and tile_exists(self.prev_col,self.prev_row) then
-				self:cancel_move(self.prev_col,self.prev_row)
-				self.teeter_frames=11
-			end
-		end,
-		cancel_move=function(self,col,row)
-			self.x=10*col-5
-			self.y=8*row-4
-			self.move_dir=nil
-			self.move_frames=0
-			self.next_move_dir=nil
-		end,
-		queue_move=function(self,dir)
-			if not self.move_dir and self.teeter_frames<=0 then
-				self:move(dir)
-			else
-				self.next_move_dir=dir
-			end
-		end,
-		move=function(self,dir)
-			self.facing=dir
-			self.move_dir=dir
-			self.move_frames=#self.horizontal_move_increments
-		end,
-		step=function(self)
-			local dist
-			if self.move_dir=="left" or self.move_dir=="right" then
-				dist=self.horizontal_move_increments[self.move_frames]
-			else
-				dist=self.vertical_move_increments[self.move_frames]
-			end
-			local move_x,move_y=dir_to_vector(self.move_dir,dist)
-			self.vx+=move_x
-			self.vy+=move_y
-			return decrement_counter_prop(self,"move_frames")
 		end,
 		on_hurt=function(self)
-			self:stun()
 			shake_screen(4,12)
-		end,
-		stun=function(self)
-			-- self:cancel_move(self:col(),self:row())
 			self.invincibility_frames=60
 			self.stun_frames=19
-			player_health:lose_heart()
-		end,
-		draw=function(self)
-			palt(3,true)
-			local x=self.x
-			local y=self.y
-			local sprite_x=0
-			local sprite_y=0
-			local sprite_dx=3
-			local sprite_dy=6
-			local sprite_width=7
-			local sprite_height=8
-			local sprite_flipped=(self.facing=="left")
-			if self.facing=="up" then
-				sprite_y=8
-				sprite_height=11
-			elseif self.facing=="down" then
-				sprite_y=19
-				sprite_dy=9
-				sprite_height=11
-			end
-			if self.stun_frames>0 then
-				sprite_flipped=(self.frames_alive%8<4)
-				sprite_dx=5
-				sprite_dy=8
-				sprite_width=11
-				sprite_height=10
-				sprite_x=64
-				sprite_y=20
-			elseif self.invincibility_frames%4>2 then
-				return
-			elseif self.teeter_frames>0 then
-				sprite_x=ternary(self.teeter_frames<=2,52,40) -- 64)
-				sprite_width=12
-				if self.facing=="up" then
-					sprite_dx=6
-					sprite_dy+=3
-				elseif self.facing=="down" then
-					sprite_dx=6
-					sprite_dy-=2
-				else
-					sprite_dx+=ternary(sprite_flipped,5,0)
-				end
-				local f=self.teeter_frames%4<2
-				palt(ternary(f,8,9),true)
-				pal(ternary(f,9,8),self.secondary_color)
-			elseif self.move_frames>0 then
-				sprite_x+=40-11*self.move_frames
-				sprite_dx+=ternary(sprite_flipped,0,4)
-				sprite_width+=4
-			end
-			pal(12,self.primary_color)
-		pal(13,self.secondary_color)
-			pal(1,self.eye_color)
-			sspr(sprite_x,sprite_y,sprite_width,sprite_height,x-sprite_dx,y-sprite_dy,sprite_width,sprite_height,sprite_flipped)
-			-- rect(left,top,right,bottom,8)
+			-- player_health:lose_heart()
 		end
 	},
 	player_health={
@@ -549,15 +525,12 @@ local entity_classes={
 		extends="movable",
 		x=40,
 		y=-28,
-		hitbox_channel=1, -- player
 		-- rainbow_frames=0,
 		expression=4,
 		laser_charge_frames=0,
 		laser_preview_frames=0,
-		-- laser_fire_frames=0,
-		-- hover_frames=0,
-		-- hover_dir=nil,
-		-- actions={},
+		hover_frames=0,
+		hover_dir=1,
 		init=function(self)
 			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,self.y+5)
 			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,self.y+5,{is_right_hand=true,dir=1})
@@ -566,22 +539,22 @@ local entity_classes={
 			-- decrement_counter_prop(self,"rainbow_frames")
 			decrement_counter_prop(self,"laser_charge_frames")
 			decrement_counter_prop(self,"laser_preview_frames")
-			-- decrement_counter_prop(self,"laser_fire_frames")
-			-- if decrement_counter_prop(self,"hover_frames") then
-			-- 	self.vx=0
-			-- 	self.vy=0
-			-- end
+			if decrement_counter_prop(self,"hover_frames") then
+				self.vx=0
+				self.vy=0
+			end
+			-- hover left and right
+			if self.hover_frames>0 then
+				if self.x<=5 then
+					self.hover_dir=1
+				elseif self.x>=75 then
+					self.hover_dir=-1
+				end
+				self.vx,self.vy=2*self.hover_dir,0
+			end
 			self:apply_move()
-			-- if self.hover_frames>0 then
-			-- 	if self.x<=5 then
-			-- 		self.hover_dir=1
-			-- 	elseif self.x>=75 then
-			-- 		self.hover_dir=-1
-			-- 	end
-			-- 	self.vx=2*self.hover_dir
-			-- 	self.vy=0
-			-- end
 			self:apply_velocity()
+			-- create particles when charging laser
 			if self.laser_charge_frames>0 then
 				local x,y,angle=self.x,self.y,rnd()
 				spawn_entity("particle",x+22*cos(angle),y+22*sin(angle),{
@@ -606,22 +579,10 @@ local entity_classes={
 			if self.is_wearing_top_hat then
 				sspr2(115,75,13,9,x-6,y-15)
 			end
-			-- draw laser
+			-- draw laser preview
 			if self.laser_preview_frames%2>0 then
 				line(x,y+7,x,60,14)
 			end
-			-- 	if self.laser_fire_frames>0 then
-			-- 		self:reset_colors()
-			-- 		rect(self.x-5,self.y+4,self.x+5,60,14)
-			-- 		rect(self.x-4,self.y+4,self.x+4,60,15)
-			-- 		rectfill(self.x-3,self.y+4,self.x+3,60,7)
-			-- 		-- line(self.x-4,self.y,self.x-4,60,7)
-			-- 		-- line(self.x,1,self.x,39,14)
-			-- 	end
-		end,
-		is_hitting=function(self,entity)
-			return false
-			-- return self.laser_fire_frames>0 and entity:col()==self:col()
 		end,
 		-- highest-level commands
 		intro=function(self)
@@ -697,11 +658,16 @@ local entity_classes={
 				)):and_then(10)
 		end,
 		shoot_lasers=function(self)
+			self.left_hand:disapper()
 			return self:promise("set_held_state","right")
 				:and_then("set_expression",5)
 				:and_then("move",10*player:col()-5,-20,20,ease_in)
 				:and_then("fire_laser")
+				:and_then("hover",5)
+				:and_then(10)
 				:and_then("fire_laser")
+				:and_then("hover",5)
+				:and_then(10)
 				:and_then("fire_laser")
 		end,
 		bloom_flowers=function(self)
@@ -719,6 +685,14 @@ local entity_classes={
 				:and_then(self.left_hand,"set_pose",3)
 				:and_then(self.right_hand,"set_pose",3)
 				:and_then(self,"move_to_home")
+				:and_then(function()
+					if not self.left_hand.visible then
+						self.left_hand:appear()
+					end
+					if not self.right_hand.visible then
+						self.right_hand:appear()
+					end
+				end)
 				:and_then("set_held_state",nil)
 		end,
 		move_to_home=function(self)
@@ -772,6 +746,7 @@ local entity_classes={
 				:and_then("spawn_laser",20)
 				:and_then("set_expression",5)
 				:and_then("preview_laser",6)
+				:and_then(20)
 		end,
 		charge_laser=function(self,frames)
 			self.laser_charge_frames=frames
@@ -784,6 +759,10 @@ local entity_classes={
 		preview_laser=function(self,frames)
 			self.laser_preview_frames=frames
 			return frames
+		end,
+		hover=function(self,cols)
+			self.hover_frames=5*cols+1
+			return 5*cols
 		end,
 		-- lowest-level commands
 		spawn_flower=function(self,x,y)
@@ -801,93 +780,6 @@ local entity_classes={
 		set_expression=function(self,expression)
 			self.expression=expression
 		end,
-		-- shoot_lasers=function(self)
-			-- local hover_frames=25
-			-- local laser_fire_frames=65
-			-- self:set_expression(5)
-			-- self:schedule(6,"move_to_player_col")
-			-- self:schedule(16,"shoot_laser")
-			-- local f=16+laser_fire_frames
-			-- local i
-			-- for i=1,2 do
-			-- 	self:schedule(f,"hover",hover_frames)
-			-- 	f+=hover_frames
-			-- 	self:schedule(f,"shoot_laser")
-			-- 	f+=laser_fire_frames
-			-- end
-		-- end,
-		-- hover=function(self,frames,dir)
-			-- self.hover_frames=frames
-			-- self.hover_dir=dir or self.hover_dir or 1
-		-- end,
-		-- charge_laser=function(self,frames)
-			-- self.laser_charge_frames=frames
-		-- end,
-		-- preview_laser=function(self,frames)
-			-- self.laser_preview_frames=frames
-		-- end,
-		-- fire_laser=function(self,frames)
-			-- self.laser_fire_frames=frames
-		-- end,
-		-- reset_state=function(self,held_hand)
-			-- if not self.left_hand.held_mirror or not self.right_hand.held_mirror then
-			-- 	self:set_held_hands(held_hand or "left")
-			-- end
-			-- if self.expression!= 1 then
-				-- self:schedule(5,"set_expression",5)
-				-- self:schedule(16,"set_expression",1)
-			-- end
-			-- self:schedule(15,"move_to_home")
-			-- self:schedule(45,"set_held_hands",held_hand)
-		-- end,
-		-- move_to_home=function(self)
-			-- lasts 30 frames
-			-- self:move(40,-28,30,{easing=ease_in,relative=false})
-			-- if not self.left_hand.held_mirror then
-			-- 	self.left_hand:move_to_home(40,-28)
-			-- end
-			-- if not self.right_hand.held_mirror then
-			-- 	self.right_hand:move_to_home(40,-28)
-			-- end
-		-- end,
-		-- set_held_hands=function(self,held_hand)
-			-- lasts 10 frames
-			-- if self.left_hand.held_mirror and held_hand!="left" then
-			-- 	self.left_hand:release_mirror()
-			-- elseif not self.left_hand.held_mirror and held_hand=="left" then
-			-- 	self.left_hand:grab_mirror(self)
-			-- end
-			-- if self.right_hand.held_mirror and held_hand!="right" then
-			-- 	self.right_hand:release_mirror()
-			-- elseif not self.right_hand.held_mirror and held_hand=="right" then
-			-- 	self.right_hand:grab_mirror(self)
-			-- end
-		-- end,
-		-- spawn2_flowers=function(self,increment,time_to_bloom)
-			-- local restricted_col=rnd_int(0,3)
-			-- local restricted_row=rnd_int(0,4)
-			-- local flowers={}
-			-- local i=rnd_int(0,increment-1)
-			-- while i<40 do
-			-- 	local c=i%8
-			-- 	local r=flr(i/8)
-			-- 	if (c!=restricted_col and (7-c)!=restricted_col) or r!=restricted_row then
-			-- 		add(flowers,{
-			-- 			x=10*c+5,
-			-- 			y=8*r+4,
-			-- 			bloom_frames=time_to_bloom,
-			-- 			flipped=(rnd()<0.5),
-			-- 			color=rnd_from_list({8,12,9,14})
-			-- 		})
-			-- 	end
-			-- 	i+=rnd_int(1,increment)
-			-- end
-			-- shuffle_list(flowers)
-			-- for i=1,#flowers do
-			-- 	flowers[i].hidden_frames=i
-			-- 	spawn_entity("flower_patch",flowers[i])
-			-- end
-		-- end,
 	},
 	magic_mirror_hand={
 		-- is_right_hand,dir
@@ -949,6 +841,10 @@ local entity_classes={
 		end,
 		appear=function(self)
 			self.visible=true
+			return self:poof()
+		end,
+		disapper=function(self)
+			self.visible=false
 			return self:poof()
 		end,
 		move_to_temple=function(self,mirror)
@@ -1044,10 +940,10 @@ function _init()
 	scene[1]()
 end
 
--- local skip_frames=0
+local skip_frames=0
 function _update()
-	-- skip_frames=increment_counter(skip_frames)
-	-- if skip_frames%1>0 then return end
+	skip_frames=increment_counter(skip_frames)
+	if skip_frames%1>0 then return end
 	-- update promises
 	local num_promises,i=#promises
 	for i=1,num_promises do
@@ -1094,7 +990,7 @@ function init_game()
 	-- get to the good part
 	boss.visible=true
 	boss_health.visible=true
-	boss:intro():and_then("decide_next_action")
+	-- boss:intro():and_then("decide_next_action")
 	-- immediately add new entities to the game
 	add_new_entities()
 end
@@ -1475,21 +1371,6 @@ function spawn_particle_burst(x,y,num_particles,color,speed)
 	end
 end
 
-function dir_to_vector(dir,magnitude)
-	magnitude=magnitude or 1
-	if dir=="left" then
-		return -magnitude,0
-	elseif dir=="right" then
-		return magnitude,0
-	elseif dir=="up" then
-		return 0,-magnitude
-	elseif dir=="down" then
-		return 0,magnitude
-	else
-		return 0,0
-	end
-end
-
 -- drawing functions
 function calc_rainbow_color()
 	rainbow_color=8+flr(scene_frame/4)%6
@@ -1648,37 +1529,37 @@ end
 
 
 __gfx__
-3ccccc33cc33333333333333cccc333333ccccc33333933cc3333333333333333333333cc3333333333333330000000000000000000000000000031111111113
-cccccccccccccccc0330000cccccc3000ccccccc30008dccccc3300000000003300000cccc0330000c0000030000000000000000000000000000011111111111
-cccc1c1cccc1111c1c3000ccc11c13000cccc1c130000cccccc33000c11cccc3300000cccc0330000c0c00030000000000000000000000000000011111101011
-cdcc1c1cddd1111c1c30cddcc11c13000dccc1c13000dcc1c1cc30ccc11111cc300000cc1c033000ccccc0030000000000000000000000000000011111110111
-cccccccccccccccccc300cccccccc3000ccccccc300ddcc1c1cc3dccddcccccc300000cc1c033d0ccccccc030000000000000000000000000000011111101011
-ddcccccddcdddd00033000ddccddc3000ddcccdc3000ddccccc3dddccccccdd3300000dccc0330dcccc11c0d0000000000000000000000000000011111111111
-ddddddddddd0000003300ddddddd3300dddddddd30000ddcccd3dddddddd0003300000ddcc0330ccc1c11cd30000000000000000000000000000031111111113
-3d333d33d33333333333333333d33333333333d3333333d33398333333d333333333333dd3333000ccccccc3000000000000000000000000000000ddddd33333
-3ccccc33333333c33333333ccccc333333ccccc33333ccccc33333333333333333333333333330dcccccc003000000000000000000000000000001d0d0d00101
-ccccccc300000ccc0330000ccccc33000ccccccc390ccccccc09300000000003300ccccccc03300ddddddd03000000000000000000000000000003d0d0d00013
-ccccccc300000ccc033000ccccccc3000ccccccc30dcccccccd330d0000000d330ccccccccc33333d333d3330000000000000000000000000000015ddd500101
-dcccccd300000ccc033000ccccccc3000dcccccd380cdddddc0830dcccccccd330ccdddddcc3000000000000000000000000000000000000000000ddddd33333
-ccccccc30000ccccc33000dcccccd3000ccccccc300ddddddd0330dcccccccd3300ddddddd030000000000000000000000000000000000000000000000000000
-cdddddc30000dcccd33000dcdddcd3000cdddddc300ddddddd0330cdddddddc33000000000030000000000000000000000000000000000000000000000000000
-ddddddd30000dcccd33000ddddddd3000ddddddd3000ddddd00330ddddddddd33000000000030000000000000000000000000000000000000000000000000000
-3d000d330000cdddc33000ddddddd30000000d0330000d000003300ddddddd033000000000030000000000000000000000000000000000000000000000000000
-30000033000ddddddd3000000ddd3300000000033000000000033000000000033000000000030000000000000000000000000000000000000000000000000000
-30000033000ddddddd30000000d03300000000033000000000033000000000033000000000030000000000000000000000000000000000000000000000000000
-333333333333d333d333333333d33333333333333333333333333333333333333333333333330000000000000000000000000000000000000000000000000000
-333333333333ccccc333333333333333333333333333333333333333333333333333333333330000000000000000000000000000000000000000000000000000
-30000033000ccccccc3000000c003300000000033000000000033000000000033000000000030000000000000000000000000000000000000000000000000000
-30000033000cc1c1cc300000cc0c3300000000033000000000033000000000033000000000030000000000000000000000000000000000000000000000000000
-3ccccc330000c1c1c330000ccccc330000ccccc330000000000330000ccc00033000000000030000000000000000000000000000000000000000000000000000
-ccccccc30000c1c1d33000cc1c1cc3000ccccccc3000ccccc0033000c1c1c0033000000000030000000000000000000000000000000000000000000000000000
-cc1c1cc30000c1c1d33000cc1c1cd3000cc1c1cc390ccccccc083000c1c1c0033000000000030000000000000000000000000000000000000000000000000000
-dc1c1cd30000d1c1d33000cd1c1cd3000cc1c1cd30dcccccccd330ddc1c1cd033000000000030000000000000000000000000000000000000000000000000000
-ccccccc30000ddccc33000ddccccc3000cdccccc380ccccccc0930dcc1c1cdd3300ccccccc030000000000000000000000000000000000000000000000000000
-dcccccd300000ddd033000dcccccc3000dcccccc300cc1c1cc0330ccc1c1ccd330ccccccccc30000000000000000000000000000000000000000000000000000
-ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc330dc11c11cd30000000000000000000000000000000000000000000000000000
-3d333d33333333d33333333d3333333333d333333333ccccc3333333dddddd33333dcccccd330000000000000000000000000000000000000000000000000000
-33333333333333333383333333883333333833333333333333333338833333300000000000000000000000000000000000000000000000000000000000000000
+33333ccccc33cc33333333333333cccc333333ccccc3333933cc33333333333333333333cc3333333c3333330000000000000000000000000000031111111113
+3000cccccccccccccccc0330000cccccc3000ccccccc3008dccccc33000000000330000cccc033000c0c00030000000000000000000000000000011111111111
+3000cccc1c1cccc1111c1c3000ccc11c13000cccc1c13000cccccc3300c11cccc330000cccc03300ccccc0030000000000000000000000000000011111101011
+3000cdcc1c1cddd1111c1c30cddcc11c13000dccc1c1300dcc1c1cc3ccc11111cc30000cc1c03d0ccccccc030000000000000000000000000000011111110111
+3000cccccccccccccccccc300cccccccc3000ccccccc30ddcc1c1cc3ccddcccccc30000cc1c033dcccc11c0d0000000000000000000000000000011111101011
+3000ddcccccddcdddd00033000ddccddc3000ddcccdc300ddccccc3ddccccccdd330000dccc033ccc1c11cd30000000000000000000000000000011111111111
+3000ddddddddddd0000003300ddddddd3300dddddddd3000ddcccd3ddddddd000330000ddcc03300ccccccc30000000000000000000000000000031111111113
+33333d333d33d33333333333333333d33333333333d333333d3339833333d33333333333dd3333dcccccc003000000000000000000000000000000ddddd33333
+333ccccc33333333c33333333ccccc333333ccccc333333ccccc333333333333333333333333330ddddddd03000000000000000000000000000001d0d0d00101
+30ccccccc033000ccc0003300ccccc00330ccccccc0390ccccccc093000000000330ccccccc03333d333d333000000000000000000000000000003d0d0d00013
+30ccccccc033000ccc000330ccccccc0330ccccccc033dcccccccd33d0000000d33ccccccccc3000000000000000000000000000000000000000015ddd500101
+30dcccccd033000ccc000330ccccccc0330dcccccd0380cdddddc083dcccccccd33ccdddddcc300000000000000000000000000000000000000000ddddd33333
+30ccccccc03300ccccc00330dcccccd0330ccccccc0330ddddddd033dcccccccd330ddddddd03000000000000000000000000000000000000000000000000000
+30cdddddc03300dcccd00330dcdddcd0330cdddddc0330ddddddd033cdddddddc330000000003000000000000000000000000000000000000000000000000000
+30ddddddd03300dcccd00330ddddddd0330ddddddd03300ddddd0033ddddddddd330000000003000000000000000000000000000000000000000000000000000
+300d000d003300cdddc00330ddddddd03300000d00033000d00000330ddddddd0330000000003000000000000000000000000000000000000000000000000000
+3000000000330ddddddd0330000ddd00330000000003300000000033000000000330000000003000000000000000000000000000000000000000000000000000
+3000000000330ddddddd03300000d000330000000003300000000033000000000330000000003000000000000000000000000000000000000000000000000000
+33333333333333d333d333333333d333333333333333333333333333333333333333333333333000000000000000000000000000000000000000000000000000
+33333333333333ccccc3333333333333333333333333333333333333333333333333333333333000000000000000000000000000000000000000000000000000
+3000000000330ccccccc0330000c0000330000000003300000000033000000000330000000003000000000000000000000000000000000000000000000000000
+3000000000330cc1c1cc033000cc0c00330000000003300000000033000000000330000000003000000000000000000000000000000000000000000000000000
+300ccccc003300c1c1c003300ccccc003300ccccc003300000000033000ccc000330000000003000000000000000000000000000000000000000000000000000
+30ccccccc03300c1c1d00330cc1c1cc0330ccccccc03300ccccc003300c1c1c00330000000003000000000000000000000000000000000000000000000000000
+30cc1c1cc03300c1c1d00330cc1c1cd0330cc1c1cc0390ccccccc08300c1c1c00330000000003000000000000000000000000000000000000000000000000000
+30dc1c1cd03300d1c1d00330cd1c1cd0330cc1c1cd033dcccccccd33ddc1c1cd0330000000003000000000000000000000000000000000000000000000000000
+30ccccccc03300ddccc00330ddccccc0330cdccccc0380ccccccc093dcc1c1cdd330ccccccc03000000000000000000000000000000000000000000000000000
+30dcccccd033000ddd000330dcccccc0330dcccccc0330cc1c1cc033ccc1c1ccd33ccccccccc3000000000000000000000000000000000000000000000000000
+30ddddddd033000ddd000330ddddddd0330ddddddd0330cc1c1cc033ccc1c1ccc33dc11c11cd3000000000000000000000000000000000000000000000000000
+333d333d33333333d33333333d3333333333d3333333333ccccc333333dddddd3333dcccccd33000000000000000000000000000000000000000000000000000
+33333333333333333383333333883333333833333333333333333338833333000000000000000000000000000000000000000000000000000000000000000000
 30550550330550550338880888330880880330880880330088800388880588300000000000000000000000000000000000000000000000000000000000000000
 35005005335005005338888ee8338888ee8338888ee83308888e03888050ee800000000000000000000000000000000000000000000000000000000000000000
 35000005335888885338888ee8338888ee8338888ee83308888e03388808ee800000000000000000000000000000000000000000000000000000000000000000
