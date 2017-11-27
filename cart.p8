@@ -222,8 +222,7 @@ local entity_classes={
 		end,
 		on_hurt=function(self)
 			self:stun()
-			freeze_frames=4
-			screen_shake_frames=max(screen_shake_frames,12)
+			shake_screen(4,12)
 		end,
 		stun=function(self)
 			-- self:cancel_move(self:col(),self:row())
@@ -398,44 +397,38 @@ local entity_classes={
 		frames_to_death=10,
 		draw=function(self)
 			if self.frames_to_death<=10 then
-				local d=self.frames_to_death
-				rect(self.x-4-d,self.y-3-d,self.x+4+d,self.y+3+d,ternary(self.frames_alive<4,5,6))
+				local f=self.frames_to_death+3
+				rect(self.x-f-1,self.y-f,self.x+f+1,self.y+f,ternary(self.frames_alive<4,5,6))
 			end
 		end,
 		on_death=function(self)
-			screen_shake_frames=max(screen_shake_frames,1)
+			shake_screen(0,1)
 			spawn_entity("magic_tile",self.x,self.y)
-			make_sparks(self.x,self.y,0,-3,4,"rainbow",0.3)
+			spawn_particle_burst(self.x,self.y,4,16,4)
 		end
 	},
 	magic_tile={
-		hurtbox_channel=2,
 		render_layer=3,
+		hurtbox_channel=2, -- pickup
 		draw=function(self)
-			local fade=mid(1,flr(self.frames_alive/2),4)
-			local color=color_ramps[rainbow_color][fade]
-			local background_color=color_ramps[1][fade]
-			rectfill(self.x-4,self.y-3,self.x+4,self.y+3,background_color)
-			rect(self.x-4,self.y-3,self.x+4,self.y+3,color)
-			rect(self.x-2,self.y-1,self.x+2,self.y+1,color)
+			local x,y,tile_color,bg_color,fade=self.x,self.y,16,1,max(0,3-flr(self.frames_alive/2))
+			if self.frames_to_death>0 then
+				tile_color,bg_color,fade=6,6,flr(self.frames_to_death/4)
+			end
+			-- draw background
+			rectfill(x-4,y-3,x+4,y+3,get_color(bg_color,fade))
+			-- draw tile
+			rect(x-4,y-3,x+4,y+3,get_color(tile_color,fade))
+			rect(x-2,y-1,x+2,y+1)
 		end,
 		on_hurt=function(self)
-			freeze_frames=1
-			screen_shake_frames=max(screen_shake_frames,3)
-			spawn_entity("magic_tile_fade",self.x,self.y)
-			make_sparks(self.x,self.y,0,-10,30,"rainbow",1)
-			boss_health:gain_health(10)
-			if boss_health.health<60 then
-				spawn_magic_tile(100-min(self.frames_alive,30)) -- 30 frame grace period
-			end
-			self:die()
-		end
-	},
-	magic_tile_fade={
-		frames_to_death=6,
-		render_layer=4,
-		draw=function(self)
-			rectfill(self.x-4,self.y-3,self.x+4,self.y+3,ternary(self.frames_alive>3,6,7))
+			shake_screen(2,3)
+			self.hurtbox_channel,self.frames_to_death=0,6
+			spawn_particle_burst(self.x,self.y,30,16,10)
+			-- boss_health:gain_health(10)
+			-- if boss_health.health<60 then
+			-- 	spawn_magic_tile(100-min(self.frames_alive,30)) -- 30 frame grace period
+			-- end
 		end
 	},
 	player_reflection={
@@ -491,50 +484,65 @@ local entity_classes={
 	},
 	flower_patch={
 		render_layer=4,
+		init=function(self)
+			local c=rnd_int(1,4)
+			self.color=({7,8,14,15})[c]
+			self.accent_color=({15,15,7,14})[c]
+			self.flipped=rnd()<0.5
+		end,
 		update=function(self)
-			if self.frames_alive>self.bloom_frames+3 then
-				self.hitbox_channel=0
-			elseif self.frames_alive==self.bloom_frames then
-				self.hitbox_channel=1 -- player
-				self.frames_to_death=35
-				local i
-				for i=1,2 do
-					spawn_entity("flower_petal",self.x,self.y-5,{
-						vx=i-2,
-						vy=rnd_num(-10,-1),
-						color=self.color,
-						swing_offset=rnd_int(1,10),
-						frames_to_death=rnd_int(40,60)
-					})
-				end
-			end
+			self.hitbox_channel=ternary(self.frames_to_death==35,1,0) -- player
 		end,
 		draw=function(self)
-			if self.frames_alive>self.hidden_frames then
-				palt(4,true)
-				pal2(8,self.color)
-				pal2(14,color_ramps[self.color][3])
-				local f=0
-				if self.bloom_frames-self.frames_alive<=0 then
-					f=2
-				elseif self.bloom_frames-self.frames_alive<=2 then
-					f=1
-				end
-				sspr2(94+9*f,95,9,8,self.x-4,self.y-4,self.flipped)
-				-- pset(self.x,self.y,8)
+			pal2(4)
+			pal2(8,self.color)
+			pal2(15,self.accent_color)
+			sspr2(9*ceil(self.frames_to_death/34)+88,85,9,8,self.x-4,self.y-4,self.flipped)
+		end,
+		bloom=function(self)
+			self.frames_to_death=38
+			local i
+			for i=0,1 do
+				spawn_entity("particle",self.x,self.y-2,{
+					vx=(i-0.5),
+					vy=rnd_num(-2,-1),
+					friction=0.1,
+					gravity=0.06,
+					frames_to_death=rnd_int(10,17),
+					color=self.color
+				})
 			end
 		end
 	},
-	flower_petal={
+	particle={
+		extends="movable",
+		friction=0,
+		gravity=0,
+		color=7,
+		init=function(self)
+			self.prev_x,self.prev_y=self.x,self.y
+			self:apply_velocity()
+		end,
 		update=function(self)
-			self.vy+=0.1
-			self.vx*=0.7
-			self.vy*=0.7
-			self.vx+=sin((self.frames_alive+self.swing_offset)/20)/10
+			self.vy+=self.gravity
+			self.vx*=(1-self.friction)
+			self.vy*=(1-self.friction)
+			self.prev_x,self.prev_y=self.x,self.y
+			self:apply_move()
 			self:apply_velocity()
 		end,
 		draw=function(self)
-			pset(self.x,self.y,self.color)
+			local fade=0
+			if self.fade_in_rate then
+				fade=max(fade,3-flr(self.frames_alive/self.fade_in_rate))
+			end
+			if self.fade_out_rate then
+				fade=min(fade,flr(self.frames_to_death/self.fade_out_rate)-3)
+			end
+			if self.reverse_fade then
+				fade*=-1
+			end
+			line(self.x,self.y,self.prev_x,self.prev_y,get_color(self.color,fade))
 		end
 	},
 	magic_mirror={
@@ -542,10 +550,10 @@ local entity_classes={
 		x=40,
 		y=-28,
 		hitbox_channel=1, -- player
-		rainbow_frames=0,
+		-- rainbow_frames=0,
 		expression=4,
-		-- laser_charge_frames=0,
-		-- laser_preview_frames=0,
+		laser_charge_frames=0,
+		laser_preview_frames=0,
 		-- laser_fire_frames=0,
 		-- hover_frames=0,
 		-- hover_dir=nil,
@@ -555,8 +563,9 @@ local entity_classes={
 			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,self.y+5,{is_right_hand=true,dir=1})
 		end,
 		update=function(self)
-			decrement_counter_prop(self,"rainbow_frames")
-			-- decrement_counter_prop(self,"laser_preview_frames")
+			-- decrement_counter_prop(self,"rainbow_frames")
+			decrement_counter_prop(self,"laser_charge_frames")
+			decrement_counter_prop(self,"laser_preview_frames")
 			-- decrement_counter_prop(self,"laser_fire_frames")
 			-- if decrement_counter_prop(self,"hover_frames") then
 			-- 	self.vx=0
@@ -573,33 +582,34 @@ local entity_classes={
 			-- 	self.vy=0
 			-- end
 			self:apply_velocity()
-			-- if self.laser_charge_frames>0 then
-			-- 	decrement_counter_prop(self,"laser_charge_frames")
-			-- 	local angle=rnd_int(1,360)
-			-- 	spawn_entity("charge_particle",self.x+20*cos(angle/360),self.y+20*sin(angle/360),{
-			-- 		target_x=self.x,
-			-- 		target_y=self.y,
-			-- 		color=7
-			-- 	})
-			-- end
+			if self.laser_charge_frames>0 then
+				local x,y,angle=self.x,self.y,rnd()
+				spawn_entity("particle",x+22*cos(angle),y+22*sin(angle),{
+					color=14,
+					fade_in_rate=3,
+					fade_out_rate=2,
+					reverse_fade=true,
+					frames_to_death=18
+				}):move(x,y,20,ease_out)
+			end
 		end,
 		draw=function(self)
+			local x,y=self.x,self.y
 			pal2(3)
 			-- draw mirror
 			sspr2(115,84,13,30,self.x-6,self.y-12)
 			-- draw face
 			if self.expression>0 then
-				sspr2(51+11*self.expression,114,11,14,self.x-5,self.y-7,false,self.expression==5 and (self.frames_alive)%4<2)
+				sspr2(51+11*self.expression,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
 			end
 			-- draw top hat
 			if self.is_wearing_top_hat then
-				sspr2(115,75,13,9,self.x-6,self.y-15)
+				sspr2(115,75,13,9,x-6,y-15)
 			end
-			-- 	-- draw laser
-			-- 	if self.laser_preview_frames%2==1 then
-			-- 		self:reset_colors()
-			-- 		line(self.x,self.y+7,self.x,60,14)
-			-- 	end
+			-- draw laser
+			if self.laser_preview_frames%2>0 then
+				line(x,y+7,x,60,14)
+			end
 			-- 	if self.laser_fire_frames>0 then
 			-- 		self:reset_colors()
 			-- 		rect(self.x-5,self.y+4,self.x+5,60,14)
@@ -619,10 +629,8 @@ local entity_classes={
 				self:set_expression(1)
 				self:don_top_hat()
 				self.right_hand:appear()
-				self.right_hand:set_pose(4)
 				self.left_hand:appear()
-				self.left_hand:grab_mirror_handle(self)
-				return self:promise(20)
+				return self:promise(10)
 			else
 				return self:promise(20)
 					:and_then(self.right_hand,"appear"):and_then(30)
@@ -640,11 +648,15 @@ local entity_classes={
 					:and_then(function()
 						self.right_hand:tap_mirror(self)
 					end):and_then(10)
-					:and_then(self,"don_top_hat"):and_then(10)
+					:and_then("don_top_hat"):and_then(10)
 			end
 		end,
 		decide_next_action=function(self)
-			return self:throw_cards()
+			local promise=self:shoot_lasers()
+			-- local promise=self:conjure_flowers(3)
+			-- local promise=self:throw_cards()
+			return promise
+				:and_then("return_to_ready_position")
 				:and_then(function()
 					-- called this way so that the progressive decide_next_action
 					--   calls don't result in an out of memory exception
@@ -652,21 +664,132 @@ local entity_classes={
 				end)
 		end,
 		-- medium-level commands
-		throw_cards=function(self)
-			local promise=self:promise()
-			if self.left_hand.held_mirror then
-				promise=promise:and_then(self.left_hand,"release_mirror")
+		conjure_flowers=function(self,density)
+			-- generate a list of flower locations
+			local flowers,i,safe_tile={},rnd_int(0,density),rnd_int(0,39)
+			while i<40 do
+				if i!=safe_tile and i!=safe_tile+7-safe_tile%8*2 then
+					add(flowers,{i%8*10+5,8*flr(i/8)+4})
+				end
+				i+=rnd_int(1,density)
 			end
-			if self.right_hand.held_mirror then
-				promise=promise:and_then(self.right_hand,"release_mirror")
+			shuffle_list(flowers)
+			-- concentrate
+			local promise=self:promise(all_promises(
+					{self.left_hand,"move_to_temple",self},
+					{self.right_hand,"move_to_temple",self}
+				)):and_then("set_expression",2)
+			-- spawn the flowers
+			self.flowers={}
+			for i=1,#flowers do
+				promise=promise:and_then("spawn_flower",flowers[i][1],flowers[i][2])
 			end
+			-- bloom the flowers
 			return promise
-				:and_then(function()
-					return all_promises(self.left_hand:throw_cards(),self.right_hand:throw_cards())
+				:and_then(30)
+				:and_then("bloom_flowers")
+				:and_then(30)
+		end,
+		throw_cards=function(self)
+			return self:promise(all_promises(
+					{self.left_hand,"throw_cards"},
+					{self.right_hand,"throw_cards"}
+				)):and_then(10)
+		end,
+		shoot_lasers=function(self)
+			return self:promise("set_held_state","right")
+				:and_then("set_expression",5)
+				:and_then("move",10*player:col()-5,-20,20,ease_in)
+				:and_then("fire_laser")
+				:and_then("fire_laser")
+				:and_then("fire_laser")
+		end,
+		bloom_flowers=function(self)
+			local i
+			for i=1,#self.flowers do
+				self.flowers[i]:bloom()
+			end
+			return self:promise("set_expression",3)
+				:and_then(self.left_hand,"set_pose",5)
+				:and_then(self.right_hand,"set_pose",5)
+				:and_then(self)
+		end,
+		return_to_ready_position=function(self)
+			return self:promise("set_expression",1)
+				:and_then(self.left_hand,"set_pose",3)
+				:and_then(self.right_hand,"set_pose",3)
+				:and_then(self,"move_to_home")
+				:and_then("set_held_state",nil)
+		end,
+		move_to_home=function(self)
+			local promise=self:promise()
+			if self.x!=40 and self.y!=-28 then
+				promise=promise:and_then("set_held_state","either")
+			end
+			return promise:and_then(function()
+					local promises={}
+					if self.x!=40 and self.y!=-28 then
+						add(promises,{self,"move",40,-28,30,ease_in})
+					end
+					if not self.left_hand.held_mirror and self.left_hand.x!=22 and self.left_hand!=-23 then
+						add(promises,{self.left_hand,"move",22,-23,30,ease_in,{-10,-10,-20,0}})
+					end
+					if not self.right_hand.held_mirror and self.right_hand.x!=58 and self.right_hand!=-23 then
+						add(promises,{self.right_hand,"move",58,-23,30,ease_in,{10,-10,20,0}})
+					end
+					return all_promises(unpack(promises))()
 				end)
-				:and_then(self,10)
+		end,
+		set_held_state=function(self,held_hand)
+			local promises={}
+			local lh,rh=self.left_hand,self.right_hand
+			if held_hand=="either" then
+				if rh.held_mirror then
+					held_hand="right"
+				else
+					held_hand="left"
+				end
+			end
+			if lh.held_mirror and held_hand!="left" then
+				add(promises,{lh,"release_mirror"})
+			elseif not lh.held_mirror and held_hand=="left" then
+				add(promises,{lh,"grab_mirror_handle",self})
+			end
+			if rh.held_mirror and held_hand!="right" then
+				add(promises,{rh,"release_mirror"})
+			elseif not rh.held_mirror and held_hand=="right" then
+				add(promises,{rh,"grab_mirror_handle",self})
+			end
+			if #promises>0 then
+				return self:promise(all_promises(unpack(promises)))
+			end
+		end,
+		fire_laser=function(self)
+			return self:promise("charge_laser",14)
+				:and_then(4)
+				:and_then("preview_laser",10)
+				:and_then("set_expression",0)
+				:and_then("spawn_laser",20)
+				:and_then("set_expression",5)
+				:and_then("preview_laser",6)
+		end,
+		charge_laser=function(self,frames)
+			self.laser_charge_frames=frames
+			return frames
+		end,
+		spawn_laser=function(self,frames)
+			spawn_entity("mirror_laser",self.x,self.y,{frames_to_death=frames})
+			return frames
+		end,
+		preview_laser=function(self,frames)
+			self.laser_preview_frames=frames
+			return frames
 		end,
 		-- lowest-level commands
+		spawn_flower=function(self,x,y)
+			add(self.flowers,spawn_entity("flower_patch",x,y))
+			return 2
+		end,
 		don_top_hat=function(self)
 			self.is_wearing_top_hat=true
 			return self:poof(0,-10)
@@ -696,17 +819,6 @@ local entity_classes={
 		-- hover=function(self,frames,dir)
 			-- self.hover_frames=frames
 			-- self.hover_dir=dir or self.hover_dir or 1
-		-- end,
-		-- shoot_laser=function(self)
-			-- local laser_charge_frames=14
-			-- local preview_frames=12
-			-- local laser_fire_frames=25
-			-- self:set_expression(4)
-			-- self:charge_laser(laser_charge_frames)
-			-- self:schedule(laser_charge_frames,"preview_laser",preview_frames+laser_fire_frames+4)
-			-- self:schedule(laser_charge_frames+preview_frames,"fire_laser",laser_fire_frames)
-			-- self:schedule(laser_charge_frames+preview_frames,"set_expression",0)
-			-- self:schedule(laser_charge_frames+preview_frames+laser_fire_frames,"set_expression",4)
 		-- end,
 		-- charge_laser=function(self,frames)
 			-- self.laser_charge_frames=frames
@@ -751,20 +863,7 @@ local entity_classes={
 			-- 	self.right_hand:grab_mirror(self)
 			-- end
 		-- end,
-		-- conjure_flowers=function(self)
-			-- local increment=3
-			-- local time_to_bloom=70
-			-- self.left_hand:set_pose(1)
-			-- self.left_hand:move(self.x-15,self.y,20,{easing=ease_in})
-			-- self.right_hand:set_pose(1)
-			-- self.right_hand:move(self.x+15,self.y,20,{easing=ease_in})
-			-- self:schedule(10,"set_expression",2)
-			-- self:schedule(30,"spawn_flowers",increment,time_to_bloom)
-			-- self:schedule(29+time_to_bloom,"set_expression",3)
-			-- self.left_hand:schedule(29+time_to_bloom,"set_pose",4)
-			-- self.right_hand:schedule(29+time_to_bloom,"set_pose",4)
-		-- end,
-		-- spawn_flowers=function(self,increment,time_to_bloom)
+		-- spawn2_flowers=function(self,increment,time_to_bloom)
 			-- local restricted_col=rnd_int(0,3)
 			-- local restricted_row=rnd_int(0,4)
 			-- local flowers={}
@@ -788,10 +887,6 @@ local entity_classes={
 			-- 	flowers[i].hidden_frames=i
 			-- 	spawn_entity("flower_patch",flowers[i])
 			-- end
-		-- end,
-		-- move_to_player_col=function(self,a,b,c,d)
-			-- 20 frames
-			-- self:move(10*player:col()-5,-20,20,{easing=ease_in,immediate=true})
 		-- end,
 	},
 	magic_mirror_hand={
@@ -849,21 +944,27 @@ local entity_classes={
 		end,
 		release_mirror=function(self)
 			self.held_mirror=nil
-			self:set_pose(3)
-			return self:move(15*self.dir,-7,25,ease_in,nil,true)
+			return self:promise("set_pose",3)
+				:and_then("move",15*self.dir,-7,25,ease_in,nil,true)
 		end,
 		appear=function(self)
 			self.visible=true
 			return self:poof()
 		end,
-		-- lowest-level commands
+		move_to_temple=function(self,mirror)
+			return self:promise("set_pose",1)
+				:and_then("move",mirror.x+14*self.dir,mirror.y+2,20)
+		end,
 		move_to_row=function(self,row)
 			return self:promise("set_pose",3)
 				:and_then("move",40+50*self.dir,8*row-4,20,ease_in_out,{10*self.dir,-10,10*self.dir,10})
 				:and_then("set_pose",2)
 		end,
+		-- lowest-level commands
 		set_pose=function(self,pose)
-			self.pose=pose
+			if not self.held_mirror then
+				self.pose=pose
+			end
 		end,
 		poof=function(self,dx,dy)
 			spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
@@ -881,56 +982,17 @@ local entity_classes={
 		-- 	-- self:move(mirror.x+dx,mirror.y+dy,10,{easing=ease_out,anchors={-10*self.dir,5,0,20}})
 		-- end,
 	},
-	spark={
-		render_layer=6,
-		init=function(self)
-			self.prev_x=self.x
-			self.prev_y=self.y
-		end,
-		update=function(self)
-			self.vx*=0.75
-			self.vy*=0.75
-			self.vy+=0.1
-			self.prev_x=self.x
-			self.prev_y=self.y
-			self:apply_velocity()
-		end,
+	mirror_laser={
+		hitbox_channel=1, -- player
 		draw=function(self)
-			-- local c=self.color
-			-- if c=="rainbow" then
-			-- 	c=rainbow[1+flr(scene_frame/4)%#rainbow]
-			-- end
-			-- local fade=mid(1,self.frames_alive+1,4)
-			-- if self.frames_to_death<=5 then
-			-- 	fade=mid(5,7-flr(self.frames_to_death/2),6)
-			-- end
-			-- color(color_ramps[c][fade])
-			if self.color=="rainbow" then
-				color(rainbow_color)
-			else
-				local fade=mid(1,self.frames_alive+1,4)
-				if self.frames_to_death<=5 then
-					fade=mid(5,7-flr(self.frames_to_death/2),6)
-				end
-				color(color_ramps[self.color][fade])
-			end
-			line(self.prev_x,self.prev_y,self.x,self.y)
-		end
-	},
-	charge_particle={
-		-- target_x,target_y,color
-		frames_to_death=15,
-		percent=0,
-		update=function(self)
-			self.percent=mid(0,self.percent+0.02+0.15*self.percent,1)
+			local x,y=self.x,self.y+4
+			rectfill(x-5,y,x+5,100,14)
+			rectfill(x-4,y,x+4,100,15)
+			rectfill(x-3,y,x+3,100,7)
 		end,
-		draw=function(self)
-			local x,y=self.x,self.y
-			local dx,dy=self.target_x-x,self.target_y-y
-			local x2,y2=x+self.percent*dx,y+self.percent*dy
-			color(color_ramps[self.color][mid(1,6-flr(self.frames_alive/3),6)])
-			pset(x2,y2)
-		end
+		is_hitting=function(self,entity)
+			return self:col()==entity:col()
+		end,
 	},
 	heart={
 		frames_to_death=150,
@@ -948,7 +1010,7 @@ local entity_classes={
 		on_hurt=function(self)
 			freeze_frames=2
 			-- player_health:gain_heart()
-			-- make_sparks(self.x,self.y,0,-3,6,8,0.3)
+			-- spawn_particle_burst(todo)
 			self:die()
 		end
 	},
@@ -1010,10 +1072,10 @@ function _draw()
 	-- call the draw function of the current scene
 	scene[3]()
 	-- draw debug info
-	-- camera()
-	-- print("mem:      "..flr(100*(stat(0)/1024)).."%",2,109,ternary(stat(1)>=1024,8,2))
-	-- print("cpu:      "..flr(100*stat(1)).."%",2,116,ternary(stat(1)>=1,8,2))
-	-- print("entities: "..#entities,2,123,ternary(#entities>50,8,2))
+	camera()
+	print("mem:      "..flr(100*(stat(0)/1024)).."%",2,109,ternary(stat(1)>=1024,8,2))
+	print("cpu:      "..flr(100*stat(1)).."%",2,116,ternary(stat(1)>=1,8,2))
+	print("entities: "..#entities,2,123,ternary(#entities>50,8,2))
 end
 
 
@@ -1028,6 +1090,7 @@ function init_game()
 	boss=spawn_entity("magic_mirror")
 	boss_health=spawn_entity("boss_health")
 	heart=spawn_entity("heart",45,4)
+	spawn_magic_tile()
 	-- get to the good part
 	boss.visible=true
 	boss_health.visible=true
@@ -1077,6 +1140,7 @@ function update_game()
 end
 
 function draw_game()
+	camera()
 	-- shake the camera
 	local shake_x=0
 	if freeze_frames<=0 and screen_shake_frames>0 then
@@ -1311,6 +1375,9 @@ function make_promise(ctx,fn,...)
 				end
 				-- the result of the fn call was a promise, when it's done, finish this promise
 				if type(f)=="table" then
+					if not f.ctx then
+						f.ctx=self.ctx
+					end
 					f:and_then(self,"finish")
 				-- wait a certain number of frames
 				elseif f and f>0 then
@@ -1354,33 +1421,55 @@ function make_promise(ctx,fn,...)
 end
 
 function all_promises(...)
-	local promise,promises,num_finished=make_promise(),{...},0
-	foreach(promises,function(promise2)
-		promise2:and_then(function()
-			num_finished+=1
-			if num_finished==#promises then
-				promise:finish()
-			end
-		end)
-	end)
-	return promise
+	local promises={...}
+	return function()
+		local promise,num_finished=make_promise(),0
+		local i
+		for i=1,#promises do
+			local promise2=make_promise(unpack(promises[i]))
+			promise2:start()
+			promise2:and_then(function()
+				num_finished+=1
+				if num_finished==#promises then
+					promise:finish()
+				end
+			end)
+		end
+		if #promises<=0 then
+			promise:finish()
+		end
+		return promise
+	end
 end
+
+-- function all_promises(...)
+-- 	local promise,promises,num_finished=make_promise(),{...},0
+-- 	foreach(promises,function(promise2)
+-- 		promise2:and_then(function()
+-- 			num_finished+=1
+-- 			if num_finished==#promises then
+-- 				promise:finish()
+-- 			end
+-- 		end)
+-- 	end)
+-- 	return promise
+-- end
 
 function spawn_magic_tile(frames_to_death)
-	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{frames_to_death=frames_to_death})
+	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{frames_to_death=max(1,frames_to_death)})
 end
 
-function make_sparks(x,y,vx,vy,num_sparks,color,speed_percent)
+function spawn_particle_burst(x,y,num_particles,color,speed)
 	local i
-	for i=1,num_sparks do
-		local angle=360*((i+rnd(0.7))/num_sparks)--rnd_int(0,360)
-		local speed=speed_percent*rnd_int(7,15)
-		local cos_angle=cos(angle/360)
-		local sin_angle=sin(angle/360)
-		spawn_entity("spark",x+5*cos_angle,y+5*sin_angle,{
-			vx=speed*cos_angle+vx,
-			vy=speed*sin_angle+vy,
+	for i=1,num_particles do
+		local angle=(i+rnd(0.7))/num_particles
+		local particle_speed=speed*rnd_num(0.5,1.2)
+		spawn_entity("particle",x,y,{
+			vx=particle_speed*cos(angle),
+			vy=particle_speed*sin(angle)-speed/2,
 			color=color,
+			gravity=0.1,
+			friction=0.25,
 			frames_to_death=rnd_int(13,19)
 		})
 	end
@@ -1421,7 +1510,7 @@ function pal2(c1,c2,fade)
 end
 
 function sspr2(x,y,width,height,x2,y2,flip_horizontal,flip_vertical)
-	sspr(x,y,width,height,x2,y2,width,height,flip_horizontal,flip_vertical)
+	sspr(x,y,width,height,x2+0.5,y2+0.5,width,height,flip_horizontal,flip_vertical)
 	-- rect(x2,y2,x2+width-1,y2+height-1,8)
 end
 
@@ -1443,6 +1532,11 @@ function ease_in_out(percent)
 end
 
 -- helper functions
+function shake_screen(freeze,shake)
+	freeze_frames=freeze
+	screen_shake_frames=max(shake,screen_shake_frames)
+end
+
 -- creates a bezier function from 4 sets of coordinates
 function make_bezier(...) -- x1,y1,x2,...,y4
 	local args={...}
@@ -1479,6 +1573,16 @@ end
 -- generates a random integer between min_val and max_val, inclusive
 function rnd_int(min_val,max_val)
 	return flr(min_val+rnd(1+max_val-min_val))
+end
+
+-- generates a random number between min_val and max_val
+function rnd_num(min_val,max_val)
+	return min_val+rnd(max_val-min_val)
+end
+
+function rnd_item(...)
+	local args={...}
+	return args[rnd_int(1,#args)]
 end
 
 -- increment a counter, wrapping to 20000 if it risks overflowing
@@ -1629,14 +1733,14 @@ ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc330dc11c11cd30000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000015511111551155111115515555555555555
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000011555555511115555555113555555555553
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005111111111551111111115333333f333333
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000004444444444444444444e84448443000090f00003
-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000880000088408000804e88008ee43000090f00003
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000008088888084880008848883088e83009094f09003
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000004800000844008380044b30b38843094499944903
-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000480080084400383004408e830043009977799003
-000000000000000000000000000000000000000000000000000000000000000000003111133333333311113048000008440883000443eee0b043097777777903
-0000000000000000000000000000000000000000000000000000000000000000000011155100000001555510808888808400800004408e8000439777777777f3
-0000000000000000000000000000000000000000000000000000000000000000000011115555555555555110884444488444444444444b4444439777777777f3
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000004444444444884448444444344443000090f00003
+0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000880000088888b088f44880308843000090f00003
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000008188888188883b88884880088843009094f09003
+0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000480000084bb31338844088380043094499944903
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000004800800844088833b43303830043009977799003
+0000000000000000000000000000000000000000000000000000000000000000000031111333333333111130480000084438f8b0044088300043097777777903
+00000000000000000000000000000000000000000000000000000000000000000000111551000000015555108188888183b888bb0440880030439777777777f3
+0000000000000000000000000000000000000000000000000000000000000000000011115555555555555110884444488444b3444444444443439777777777f3
 0000000000000000000000000000000000000000000000000000000000000000000011111155555555511110000000000000000000000000000977777777777f
 0000000000000000000000000000000000000000000000000000000000000000000033331111111111133330000000000000000000000000000977777777777f
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009777777777779
@@ -1658,19 +1762,19 @@ ddddddd300000ddd033000ddddddd3000ddddddd300cc1c1cc0330ccc1c1ccc330dc11c11cd30000
 00000000000000000000000000000000000000000000000000000000000111111111155555130775770033677777763300777770330777757033000099f00003
 00000000000000000000000000000000000000000000000000000000000110000000155155130077700033000000003300077700330677776033000049900003
 00000000000000000000000000000000000000000000000000000000000113333333115551133336333333333333333333336333333333333333333334333333
-0000000000000000000000000000000000000000000000000000000000000033337773333333366633333333777333333337773333333376633333333cbb3333
-00000000000000000000000000000000000000000000000000000000000000307777777033066666660330777777703307777776033067667770330accbbee03
-0000000000000000000000000000000000000000000000000000000000000037777777773366666666633ddd777ddd337777766773367677676733aaccbbee83
+0000000000000000000000000000000000000000000000000000000000000033336663333333366633333333666333333337773333333376633333333cbb3333
+00000000000000000000000000000000000000000000000000000000000000306666666033066666660330777777703307777776033067667770330accbbee03
+0000000000000000000000000000000000000000000000000000000000000037777777773377766677733ddd777ddd337777766773367677676733aaccbbee83
 000000000000000000000000000000000000000000000000000000000000003ddd777ddd3377777777733777777777337776677663377676767633aaccbbee83
 000000000000000000000000000000000000000000000000000000000000007777777777777dd777dd7777d77777d7777667766666676766766776aaccbbee88
-0000000000000000000000000000000000000000000000000000000000000077d77777d777777d7d77777d7d777d7d766776666677767677677666aaccbbee88
+0000000000000000000000000000000000000000000000000000000000000077d77777d777776d7d67777d7d777d7d766776666677767677677666aaccbbee88
 000000000000000000000000000000000000000000000000000000000000007d7d777d7d7777777777777777777777777666667777677676766776aaccbbee88
 0000000000000000000000000000000000000000000000000000000000000077d77777d777d7d777d7d777ddddddd7766666777776767767777676aaccbbee88
 000000000000000000000000000000000000000000000000000000000000007777777777777d77777d7777ddddddd7766677777667776776767766aaccbbee88
 0000000000000000000000000000000000000000000000000000000000000077d77777d777777777777777ddddddd776777776677767676767766111ee11cc11
 0123000000000000000000000000000000000000000000000000000000000037ddddddd73377ddddd773377ddddd7733777667777336766676673311ee11cc13
-4567000000000000000000000000000000000000000000000000000000000036777777763377d777d7733677777776337667777773376776767633ddddddddd3
-89a30000000000000000000000000000000000000000000000000000000000306677766033077777770330667776603307777777033076776670330ddddddd03
+4567000000000000000000000000000000000000000000000000000000000036777777763377d777d7733667777766337667777773376776767633ddddddddd3
+89a30000000000000000000000000000000000000000000000000000000000306677766033077777770330666666603307777777033076776670330ddddddd03
 cdef000000000000000000000000000000000000000000000000000000000033336663333333366633333333666333333337773333333376733333333ddd3333
 
 __gff__
