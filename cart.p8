@@ -20,12 +20,6 @@ hurtbox_channels:
 	1: player
 	2: pickup
 	4: coin (stationary)
-
-symbols:
-	up:		”
-	down:	ƒ
-	left:	‹
-	right:	‘
 ]]
 
 -- useful noop function
@@ -38,6 +32,7 @@ local rainbow_color
 
 -- global config vars
 local speed_mode=true
+local tiles_collected
 
 -- global scene vars
 local scenes
@@ -126,6 +121,9 @@ local entity_classes={
 					end_x,end_y)
 			}
 			return max(0,dur-1)
+		end,
+		cancel_move=function(self)
+			self.vx,self,vy,self.movement=0,0 -- ,nil
 		end
 	},
 	player={
@@ -144,15 +142,7 @@ local entity_classes={
 			decrement_counter_prop(self,"teeter_frames")
 			decrement_counter_prop(self,"bump_frames")
 			-- try moving
-			if btnp(0) then
-				self:queue_step("left")
-			elseif btnp(1) then
-				self:queue_step("right")
-			elseif btnp(2) then
-				self:queue_step("up")
-			elseif btnp(3) then
-				self:queue_step("down")
-			end
+			self:check_inputs()
 			-- apply moves that were delayed from teetering/stun
 			if self.next_step_dir and not self.step_dir then
 				self:step(self.next_step_dir)
@@ -162,20 +152,18 @@ local entity_classes={
 				self.vx=0
 				self.vy=0
 				self:apply_step()
-				local prev_col,prev_row=self:col(),self:row()
+				self.prev_col,self.prev_row=self:col(),self:row()
 				self:apply_velocity()
 				local col,row=self:col(),self:row()
-				if prev_col!=col or prev_row!=row then
+				if self.prev_col!=col or self.prev_row!=row then
 					-- teeter off the edge of the earth if the player tries to move off the map
 					if col!=mid(1,col,8) or row!=mid(1,row,5) then
-						self:undo_step(prev_col,prev_row)
+						self:undo_step(self.prev_col,self.prev_row)
 						self.teeter_frames=11
 					end
 					-- bump into an obstacle or reflection
-					if is_tile_occupied(col,row) or (player_reflection and (prev_col<5)!=(col<5)) then
-						self:undo_step(prev_col,prev_row)
-						self.bump_frames=11
-						freeze_and_shake_screen(0,5)
+					if is_tile_occupied(col,row) or (player_reflection and (self.prev_col<5)!=(col<5)) then
+						self:bump()
 					end
 				end
 			end
@@ -231,6 +219,22 @@ local entity_classes={
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
 				sspr2(spritesheet_x,spritesheet_y,11,spritesheet_height,self.x-dx,self.y-dy,flipped)
 			end
+		end,
+		check_inputs=function(self)
+			if btnp(0) then
+				self:queue_step("left")
+			elseif btnp(1) then
+				self:queue_step("right")
+			elseif btnp(2) then
+				self:queue_step("up")
+			elseif btnp(3) then
+				self:queue_step("down")
+			end
+		end,
+		bump=function(self)
+			self:undo_step(self.prev_col,self.prev_row)
+			self.bump_frames=11
+			freeze_and_shake_screen(0,5)
 		end,
 		undo_step=function(self,col,row)
 			self.x=10*col-5
@@ -416,7 +420,29 @@ local entity_classes={
 			spawn_entity("poof",self.x,self.y)
 		end,
 		update=function(self)
+				-- self:apply_step()
+				-- local prev_col,prev_row=self:col(),self:row()
+				-- self:apply_velocity()
+				-- local col,row=self:col(),self:row()
+				-- if prev_col!=col or prev_row!=row then
+				-- 	-- teeter off the edge of the earth if the player tries to move off the map
+				-- 	if col!=mid(1,col,8) or row!=mid(1,row,5) then
+				-- 		self:undo_step(prev_col,prev_row)
+				-- 		self.teeter_frames=11
+				-- 	end
+				-- 	-- bump into an obstacle or reflection
+				-- 	if is_tile_occupied(col,row) or (player_reflection and (prev_col<5)!=(col<5)) then
+				-- 		self:undo_step(prev_col,prev_row)
+				-- 		self.bump_frames=11
+				-- 		freeze_and_shake_screen(0,5)
+				-- 	end
+				-- end
+			local prev_col,prev_row=self:col(),self:row()
 			self:copy_player()
+			if (prev_col!=self:col() or prev_row!=self:row()) and is_tile_occupied(self:col(),self:row()) then
+				player:bump()
+				self:copy_player()
+			end
 		end,
 		on_hurt=function(self,entity)
 			player:on_hurt(entity)
@@ -441,13 +467,20 @@ local entity_classes={
 		end
 	},
 	playing_card={
-		-- vx,is_red
+		-- vx,has_heart
 		frames_to_death=110,
 		hitbox_channel=1, -- player
+		is_boss_generated=true,
+		update=function(self)
+			if self.frames_alive==65 and self.has_heart then
+				spawn_entity("heart",self.x,self.y)
+			end
+			self:apply_velocity()
+		end,
 		draw=function(self)
 			pal2(3)
 			-- some cards are red
-			if self.is_red then
+			if self.has_heart then
 				pal2(5,8)
 				pal2(6,15)
 			end
@@ -462,6 +495,7 @@ local entity_classes={
 	},
 	flower_patch={
 		render_layer=4,
+		is_boss_generated=true,
 		init=function(self)
 			local c=rnd_int(1,3)
 			self.color=({8,14,15})[c]
@@ -494,8 +528,10 @@ local entity_classes={
 	},
 	coin={
 		extends="movable",
+		is_boss_generated=true,
 		init=function(self)
-			self:promise("move",10*player:col()-3,8*player:row()-4,30,ease_out,{20,-30,10,-60})
+			self.target_x,self.target_y=10*player:col()-5,8*player:row()-4
+			self:promise("move",self.target_x+2,self.target_y,30,ease_out,{20,-30,10,-60})
 				:and_then(2)
 				:and_then(function()
 					self.hitbox_channel=5 -- player, coin
@@ -516,19 +552,25 @@ local entity_classes={
 		end,
 		draw=function(self)
 			pal2(3)
+			if self.frames_alive<36 then
+				circfill(self.target_x,self.target_y,min(flr(self.frames_alive/7),4),2)
+			end
 			local sprite=0
 			if self.frames_alive>20 then
 				sprite=2
 			end
 			if self.frames_alive>=30 then
-				sprite=4
+				sprite=ternary(self.has_heart,5,4)
 			else
 				sprite+=flr(self.frames_alive/3)%2
 			end
 			sspr(9*sprite,62,9,9,self.x-4,self.y-5)
 		end,
 		on_death=function(self)
-			spawn_particle_burst(self.x,self.y,6,9,4)
+			spawn_particle_burst(self.x,self.y,6,6,4)
+			if self.has_heart then
+				spawn_entity("heart",self.x,self.y)
+			end
 		end
 	},
 	particle={
@@ -569,6 +611,9 @@ local entity_classes={
 		expression=4,
 		laser_charge_frames=0,
 		laser_preview_frames=0,
+		idle_mult=0,
+		idle_x=0,
+		idle_y=0,
 		hover_frames=0,
 		hover_dir=1,
 		visible=false,
@@ -579,6 +624,13 @@ local entity_classes={
 			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,self.y+5,{is_right_hand=true,dir=1})
 		end,
 		update=function(self)
+			if self.is_idle then
+				self.idle_mult=min(self.idle_mult+0.05,1)
+			else
+				self.idle_mult=max(0,self.idle_mult-0.05)
+			end
+			self.idle_x=self.idle_mult*3*sin(self.frames_alive/60)
+			self.idle_y=self.idle_mult*2*sin(self.frames_alive/30)
 			decrement_counter_prop(self,"laser_charge_frames")
 			decrement_counter_prop(self,"laser_preview_frames")
 			if decrement_counter_prop(self,"hover_frames") then
@@ -609,11 +661,11 @@ local entity_classes={
 			end
 		end,
 		draw=function(self)
-			local x,y=self.x,self.y
+			local x,y=self.x+self.idle_x,self.y+self.idle_y
 			pal2(3)
 			if self.visible then
 				-- draw mirror
-				sspr2(115,84,13,30,self.x-6,self.y-12)
+				sspr2(115,84,13,30,x-6,y-12)
 				-- draw face
 				if self.expression>0 then
 					sspr2(40+11*self.expression,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
@@ -672,19 +724,34 @@ local entity_classes={
 			end
 		end,
 		decide_next_action=function(self)
-			-- local promise=self:shoot_lasers()
+			local promise=self:shoot_lasers()
 			-- local promise=self:conjure_flowers(3)
-			-- local promise=self:throw_cards()
-			-- local promise=self:throw_coins(3)
-			local promise=self:cast_reflection()
+			-- local promise=self:throw_cards("right",4)
+			-- local promise=self:throw_coins(3,3)
 			return promise
-				:and_then("return_to_ready_position"):and_then(100)
+				:and_then("return_to_ready_position")
 				:and_then(function()
 					-- called this way so that the progressive decide_next_action
 					--   calls don't result in an out of memory exception
 					self:decide_next_action()
 				end)
 		end,
+		-- cancel_actions=function(self)
+			-- cancel any boss-related promises
+			-- foreach(promises,function(promise)
+			-- 	if promise.ctx==self or promise.ctx==self.left_hand or promise.ctx==self.right_hand then
+			-- 		promise:cancel()
+			-- 	end
+			-- end)
+			-- self.vx,self.vy,self.movement=0,0 -- ,nil
+			-- self.left_hand.vx,self.left_hand.vy,self.left_hand.movement=0,0 -- ,nil
+			-- self.right_hand.vx,self.right_hand.vy,self.right_hand.movement=0,0 -- ,nil
+			-- foreach(entities,function(entity)
+			-- 	if entity.is_boss_generated then
+			-- 		entity:despawn()
+			-- 	end
+			-- end)
+		-- end,
 		-- medium-level commands
 		conjure_flowers=function(self,density)
 			-- generate a list of flower locations
@@ -697,10 +764,14 @@ local entity_classes={
 			end
 			shuffle_list(flowers)
 			-- concentrate
-			local promise=self:promise(all_promises(
+			local promise=self:promise(self.left_hand,"set_idle",false)
+				:and_then(self.right_hand,"set_idle",false)
+				:and_then(self,"set_idle",false)
+				:and_then(all_promises(
 					{self.left_hand,"move_to_temple",self},
 					{self.right_hand,"move_to_temple",self}
-				)):and_then("set_expression",2)
+				))
+				:and_then("set_expression",2)
 			-- spawn the flowers
 			self.flowers={}
 			for i=1,#flowers do
@@ -736,26 +807,29 @@ local entity_classes={
 				end)
 				:and_then(30)
 		end,
-		throw_cards=function(self,hand)
+		throw_cards=function(self,hand,heart_row)
 			local promises={}
 			if hand!="right" then
-				add(promises,{self.left_hand,"throw_cards"})
+				add(promises,{self.left_hand,"throw_cards",heart_row})
 			end
 			if hand!="left" then
-				add(promises,{self.right_hand,"throw_cards"})
+				add(promises,{self.right_hand,"throw_cards",heart_row})
 			end
-			return self:promise(all_promises(unpack(promises))):and_then(self,10)
+			return self:promise(all_promises(unpack(promises)))
 		end,
-		throw_coins=function(self,num_coins)
+		throw_coins=function(self,num_coins,heart_index)
 			local promise=self:promise(self.right_hand,"move_to_temple",self)
 			local i
 			for i=1,num_coins do
 				promise=promise:and_then(self.right_hand,"set_pose",1)
+					:and_then("set_idle",false)
 					:and_then(self,"set_expression",7)
-					:and_then(ternary(i==1,30,6))
+					:and_then("set_idle",false)
+					:and_then(ternary(i==1,24,3))
+					:and_then("spawn_coin",i==heart_index)
+					:and_then(3)
 					:and_then("set_expression",3)
 					:and_then(self.right_hand,"set_pose",4)
-					:and_then(self,"spawn_coin")
 					:and_then(self,20)
 			end
 			return promise
@@ -764,6 +838,7 @@ local entity_classes={
 			self.left_hand:disapper()
 			return self:promise("set_held_state","right")
 				:and_then("set_expression",5)
+				:and_then("set_all_idle",false)
 				:and_then("move",10*player:col()-5,-20,20,ease_in)
 				:and_then("fire_laser")
 				:and_then("hover",5)
@@ -773,6 +848,7 @@ local entity_classes={
 				:and_then(10)
 				:and_then("fire_laser")
 		end,
+		-- lowest-level commands
 		bloom_flowers=function(self)
 			local i
 			for i=1,#self.flowers do
@@ -788,6 +864,9 @@ local entity_classes={
 			return self:promise("set_expression",1)
 				:and_then(self.left_hand,"set_pose",3)
 				:and_then(self.right_hand,"set_pose",3)
+				:and_then(self.left_hand,"set_idle",true)
+				:and_then(self.right_hand,"set_idle",true)
+				:and_then(self,"set_idle",true)
 				:and_then(self,"move_to_home")
 				:and_then(function()
 					if not self.left_hand.visible then
@@ -801,7 +880,8 @@ local entity_classes={
 		end,
 		move_to_home=function(self)
 			local promise=self:promise()
-			if self.x!=40 and self.y!=-28 then
+			local dx,dy=40-self.x,-28-self.y
+			if dx>10 or dy>10 then
 				promise=promise:and_then("set_held_state","either")
 			end
 			return promise:and_then(function()
@@ -876,13 +956,20 @@ local entity_classes={
 			self.coins={}
 			return 10
 		end,
-		-- lowest-level commands
+		set_idle=function(self,idle)
+			self.is_idle=idle
+		end,
+		set_all_idle=function(self,idle)
+			self:set_idle(idle)
+			self.left_hand:set_idle(idle)
+			self.right_hand:set_idle(idle)
+		end,
 		spawn_flower=function(self,x,y)
 			add(self.flowers,spawn_entity("flower_patch",x,y))
 			return 2
 		end,
-		spawn_coin=function(self)
-			add(self.coins,spawn_entity("coin",self.x+12,self.y))
+		spawn_coin=function(self,has_heart)
+			add(self.coins,spawn_entity("coin",self.x+12,self.y,{has_heart=has_heart}))
 		end,
 		don_top_hat=function(self)
 			self.is_wearing_top_hat=true
@@ -903,15 +990,29 @@ local entity_classes={
 		pose=3,
 		dir=-1,
 		held_mirror=nil,
+		idle_mult=0,
+		idle_x=0,
+		idle_y=0,
 		update=function(self)
+			if self.is_idle then
+				self.idle_mult=min(self.idle_mult+0.05,1)
+			else
+				self.idle_mult=max(0,self.idle_mult-0.05)
+			end
+			local f=boss.frames_alive+ternary(self.is_right_hand,9,4)
+			self.idle_x=self.idle_mult*3*sin(f/60)
+			self.idle_y=self.idle_mult*4*sin(f/30)
 			self:apply_move()
 			self:apply_velocity()
 			if self.held_mirror then
+				self.idle_x=self.held_mirror[1].idle_x
+				self.idle_y=self.held_mirror[1].idle_y
 				self.x=self.held_mirror[1].x+self.held_mirror[2]
 				self.y=self.held_mirror[1].y+self.held_mirror[3]
 			end
 		end,
 		draw=function(self)
+			local x,y=self.x+self.idle_x,self.y+self.idle_y
 			if self.visible then
 				if boss_health.rainbow_frames>0 then
 					local i
@@ -921,22 +1022,22 @@ local entity_classes={
 					pal2(13,16,-1)
 				end
 				pal2(3)
-				sspr2(12*self.pose-12,51,12,11,self.x-ternary(self.is_right_hand,7,4),self.y-8,self.is_right_hand)
+				sspr2(12*self.pose-12,51,12,11,x-ternary(self.is_right_hand,7,4),y-8,self.is_right_hand)
 				if self.holding_wand then
 					if self.pose==1 then
-						sspr2(64,30,7,13,self.x+4,self.y-8)
+						sspr2(64,30,7,13,x+4,y-8)
 					else
-						sspr2(71,30,7,13,self.x-2,self.y-16)
+						sspr2(71,30,7,13,x-2,y-16)
 					end
 				end
 			end
 		end,
 		-- highest-level commands
-		throw_cards=function(self)
-			local promise=self:promise(11-11*self.dir)
+		throw_cards=function(self,heart_row)
+			local promise=self:promise("set_idle",false)
 			local i
 			for i=ternary(self.is_right_hand,1,2),5,2 do
-				promise=promise:and_then("throw_card_at_row",i)
+				promise=promise:and_then("throw_card_at_row",i,i==heart_row)
 			end
 			return promise
 		end,
@@ -961,10 +1062,12 @@ local entity_classes={
 			self.holding_wand=true
 			return self:promise("poof",10)
 		end,
-		-- medium-level commands
-		throw_card_at_row=function(self,row)
+		set_idle=function(self,idle)
+			self.is_idle=idle
+		end,
+		throw_card_at_row=function(self,row,has_heart)
 			return self:promise("move_to_row",row):and_then(10)
-				:and_then("set_pose",1):and_then("spawn_card"):and_then(10)
+				:and_then("set_pose",1):and_then("spawn_card",has_heart):and_then(10)
 				:and_then("set_pose",2):and_then(4)
 		end,
 		release_mirror=function(self)
@@ -999,8 +1102,8 @@ local entity_classes={
 			spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
 			return 12
 		end,
-		spawn_card=function(self)
-			spawn_entity("playing_card",self.x-10*self.dir,self.y,{vx=-self.dir,is_red=(rnd()<0.5)})
+		spawn_card=function(self,has_heart)
+			spawn_entity("playing_card",self.x-10*self.dir,self.y,{vx=-self.dir,has_heart=has_heart})
 		end,
 		--
 		-- move_to_home=function(self,x,y)
@@ -1013,6 +1116,8 @@ local entity_classes={
 	},
 	mirror_laser={
 		hitbox_channel=1, -- player
+		is_boss_generated=true,
+		render_layer=9,
 		draw=function(self)
 			local x,y=self.x,self.y+4
 			rectfill(x-5,y,x+5,100,14)
@@ -1033,7 +1138,7 @@ local entity_classes={
 				if (f+4)%30>14 then
 					pal2(14,8)
 				end
-				sspr2(ternary(f%30<20,36,45),30,9,7,self.x-4,self.y-5)
+				sspr2(ternary(f%30<20,36,45),30,9,7,self.x-4,self.y-5-max(0,self.frames_alive-0.09*self.frames_alive*self.frames_alive))
 			end
 		end,
 		on_hurt=function(self)
@@ -1080,6 +1185,7 @@ function _update()
 	-- call the update function of the current scene
 	if freeze_frames>0 then
 		freeze_frames=decrement_counter(freeze_frames)
+		player:check_inputs()
 	else
 		screen_shake_frames=decrement_counter(screen_shake_frames)
 		scene_frame=increment_counter(scene_frame)
@@ -1115,16 +1221,18 @@ function init_game()
 	-- reset everything
 	entities,new_entities={},{}
 	-- create starting entities
+	tiles_collected=0
 	player=spawn_entity("player",35,20)
 	player_health=spawn_entity("player_health")
 	player_reflection=nil
-	boss=spawn_entity("magic_mirror")
+	boss=nil
 	boss_health=spawn_entity("boss_health")
 	if speed_mode then
+		boss=spawn_entity("magic_mirror")
 		boss.visible=true
 		player_health.visible=true
 		boss_health.visible=true
-		boss:intro(true):and_then("decide_next_action")
+		boss:intro(true):and_then("return_to_ready_position"):and_then("decide_next_action")
 		spawn_magic_tile()
 	else
 		-- start the slow intro to the game
@@ -1189,7 +1297,6 @@ function update_game()
 end
 
 function draw_game()
-	camera()
 	-- shake the camera
 	local shake_x=0
 	if freeze_frames<=0 and screen_shake_frames>0 then
@@ -1334,6 +1441,9 @@ function spawn_entity(class_name,x,y,args,skip_init)
 				self:on_death()
 				self.is_alive=false
 			end,
+			despawn=function(self)
+				self.is_alive=false
+			end,
 			on_death=noop,
 			col=function(self)
 				return 1+flr(self.x/10)
@@ -1359,6 +1469,13 @@ function spawn_entity(class_name,x,y,args,skip_init)
 				end
 				p:start()
 				return p
+			end,
+			cancel_promises=function(self)
+				foreach(promises,function(promise)
+					if promise.ctx==self then
+						promise:cancel()
+					end
+				end)
 			end
 		}
 	end
@@ -1373,6 +1490,7 @@ function spawn_entity(class_name,x,y,args,skip_init)
 	for k,v in pairs(args or {}) do
 		entity[k]=v
 	end
+	entity.class_name=class_name
 	if not skip_init then
 		-- initialize it
 		entity:init(args)
@@ -1415,7 +1533,7 @@ function make_promise(ctx,fn,...)
 		ctx=ctx,
 		and_thens={},
 		start=function(self)
-			if not self.started then
+			if not self.started and not self.canceled then
 				self.started=true
 				-- call callback (if there is one) and get the frames left
 				local f=fn
@@ -1441,10 +1559,21 @@ function make_promise(ctx,fn,...)
 			end
 		end,
 		finish=function(self)
-			if not self.finished then
+			if not self.finished and not self.canceled then
 				self.finished=true
 				foreach(self.and_thens,function(promise)
 					promise:start()
+				end)
+			end
+		end,
+		cancel=function(self)
+			if not self.canceled then
+				self.canceled,self.finished=true,true
+				if self.parent_promise then
+					self.parent_promise:cancel()
+				end
+				foreach(self.and_thens,function(promise)
+					promise:cancel()
 				end)
 			end
 		end,
@@ -1460,8 +1589,9 @@ function make_promise(ctx,fn,...)
 			else
 				promise=make_promise(self.ctx,ctx,...)
 			end
+			promise.parent_promise=self
 			-- start the promise now, or shcedule it to start when this promise finishes
-			if self.finished then
+			if self.finished and not self.canceled then
 				promise:start()
 			else
 				add(self.and_thens,promise)
@@ -1495,7 +1625,21 @@ end
 
 -- magic tile functions
 function on_magic_tile_picked_up(tile)
-	spawn_magic_tile(100-min(tile.frames_alive,30)) -- 30 frame grace period
+	if boss_health.health<60 then
+		spawn_magic_tile(100-min(tile.frames_alive,30)) -- 30 frame grace period
+	end
+	if not speed_mode then
+		tiles_collected=increment_counter(tiles_collected)
+		if tiles_collected==2 then
+			boss_health.visible=true
+		elseif tiles_collected==4 then
+			boss=spawn_entity("magic_mirror")
+		elseif tiles_collected==5 then
+			boss.visible=true
+		elseif tiles_collected==6 then
+			boss:intro()
+		end
+	end
 end
 
 function spawn_magic_tile(frames_to_death)
@@ -1568,6 +1712,10 @@ end
 
 function ease_in_out(percent)
 	return ternary(percent<0.5,ease_out(2*percent)/2,0.5+ease_in(2*percent-1)/2)
+end
+
+function ease_out_in(percent)
+	return ternary(percent<0.5,ease_in(2*percent)/2,0.5+ease_out(2*percent-1)/2)
 end
 
 -- helper functions
@@ -1749,15 +1897,15 @@ __gfx__
 30d77dd7777730d77dd770033066666666033067677700033066677600033007776d000300000000000000000000000000000000000000000000000000000000
 30d67777700330d67777600330006666dd033006666d0003306676600003300066dd000300000000000000000000000000000000000000000000000000000000
 333366663333333366663333333333ddd333333366d33333333dddd333333333ddd3333300000000000000000000000000000000000000000000000000000000
-33333333333333333333333333333999933333aaaaa3333aaaaa3300000000000000000000000000000000000000000000000000000000000000000000000000
-3000000033000000033000000033999999033aaa9a7a33aa9a97a300000000000000000000000000000000000000000000000000000000000000000000000000
-300000003300990003aa0000003999999993aaa99977aaa9a9797a00000000000000000000000000000000000000000000000000000000000000000000000000
-30aa00003309999003aaaa00003999999993aaa9aa77aaa9aaa97a00000000000000000000000000000000000000000000000000000000000000000000000000
-3000aa00330999900330aaaa003999999993aaa999aaaaaa9a9aaa00000000000000000000000000000000000000000000000000000000000000000000000000
-3000000033009900033000aaaa39999999939aaa9aaa99aaa9aaa900000000000000000000000000000000000000000000000000000000000000000000000000
-300000003300000003300000aa339999990399aaaaa9999aaaaa9900000000000000000000000000000000000000000000000000000000000000000000000000
-30000000330000000330000000330999900339499999339499999300000000000000000000000000000000000000000000000000000000000000000000000000
-33333333333333333333333333333333333333494943333494943300000000000000000000000000000000000000000000000000000000000000000000000000
+33333333333333333333333333333dddd33333666663333666663300000000000000000000000000000000000000000000000000000000000000000000000000
+3000000033000000033000000033dddddd033666d7763366d6d76300000000000000000000000000000000000000000000000000000000000000000000000000
+300000003300dd0003660000003dddddddd3666ddd77666d6d7d7600000000000000000000000000000000000000000000000000000000000000000000000000
+30660000330dddd003666600003dddddddd3666d6667666d666d7600000000000000000000000000000000000000000000000000000000000000000000000000
+30006600330dddd003306666003dddddddd3666ddd666666ddd66600000000000000000000000000000000000000000000000000000000000000000000000000
+300000003300dd0003300066663dddddddd3d666d666dd666d666d00000000000000000000000000000000000000000000000000000000000000000000000000
+3000000033000000033000006633dddddd03dd66666dddd66666dd00000000000000000000000000000000000000000000000000000000000000000000000000
+30000000330000000330000000330dddd0033d5ddddd33d5ddddd300000000000000000000000000000000000000000000000000000000000000000000000000
+333333333333333333333333333333333333335d5d533335d5d53300000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
