@@ -31,7 +31,7 @@ local color_ramps={}
 local rainbow_color
 
 -- global config vars
-local speed_mode=true
+local beginning_phase=1
 local tiles_collected
 
 -- global scene vars
@@ -63,7 +63,12 @@ local entity_classes={
 			for i=0,3 do
 				if btn(i) and not self.button_presses[i] then
 					self.num_buttons_pressed+=1
-					self.frames_to_death,self.button_presses[i]=240-45*self.num_buttons_pressed,true
+					if self.frames_to_death<=0 then
+						self.frames_to_death=180-30*self.num_buttons_pressed
+					else 
+						self.frames_to_death=min(self.frames_to_death,180-30*self.num_buttons_pressed)
+					end
+					self.button_presses[i]=true
 				end
 			end
 		end,
@@ -287,7 +292,7 @@ local entity_classes={
 		x=63,
 		y=122,
 		visible=false,
-		hearts=3,
+		hearts=4,
 		anim=nil,
 		anim_frames=0,
 		is_user_interface=true,
@@ -331,7 +336,7 @@ local entity_classes={
 			end
 			if not self.visible then
 				self.visible=true
-				freeze_and_shake_screen(20,0)
+				freeze_and_shake_screen(9,0)
 			end
 		end
 	},
@@ -340,10 +345,14 @@ local entity_classes={
 		y=5,
 		visible=false,
 		health=0,
+		phase=0,
 		visible_health=0,
 		rainbow_frames=0,
 		is_user_interface=true,
 		update=function(self)
+			if self.health>=60 then
+				self.visible_health=60
+			end
 			if self.visible_health<self.health then
 				self.visible_health+=1
 			end
@@ -362,7 +371,8 @@ local entity_classes={
 				rectfill(x-30,y-3,x+mid(-30,-31+self.visible_health,29),y+3,5)
 			end
 		end,
-		gain_health=function(self,health)
+		gain_health=function(self)
+			local health=10
 			self.health=mid(0,self.health+health,60)
 			self.rainbow_frames=15+(self.health-self.visible_health)
 		end
@@ -405,7 +415,7 @@ local entity_classes={
 			freeze_and_shake_screen(2,6)
 			self.hurtbox_channel,self.frames_to_death=0,6
 			spawn_particle_burst(self.x,self.y,30,16,10)
-			boss_health:gain_health(10)
+			boss_health:gain_health()
 			on_magic_tile_picked_up(self)
 		end
 	},
@@ -668,7 +678,7 @@ local entity_classes={
 				sspr2(115,84,13,30,x-6,y-12)
 				-- draw face
 				if self.expression>0 then
-					sspr2(40+11*self.expression,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
+					sspr2(29+11*self.expression,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
 				end
 			end
 			if boss_health.rainbow_frames>0 then
@@ -676,11 +686,11 @@ local entity_classes={
 				for i=1,15 do
 					pal2(i,16)
 				end
-				if self.expression>0 then
+				if self.expression>0 and self.expression!=5 and self.expression!=4 then
 					pal2(13,16,-1)
 				end
 				pal2(3)
-				sspr2(40+11*max(1,self.expression),114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
+				sspr2(117,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
 				pal()
 				pal2(3)
 			end
@@ -696,45 +706,107 @@ local entity_classes={
 			end
 		end,
 		-- highest-level commands
-		intro=function(self,speed_intro)
-			if speed_intro then
-				self:set_expression(1)
-				self:don_top_hat()
-				self.right_hand:appear()
-				self.left_hand:appear()
-				return self:promise(10)
-			else
-				return self:promise(20)
-					:and_then(self.right_hand,"appear"):and_then(30)
-					:and_then("set_pose",4):and_then(6)
-					:and_then("set_pose",5):and_then(6)
-					:and_then("set_pose",4):and_then(6)
-					:and_then("set_pose",5):and_then(6)
-					:and_then("set_pose",4):and_then(10)
-					:and_then(self.left_hand,"appear"):and_then(30)
-					:and_then("grab_mirror_handle",self):and_then(5)
-					:and_then(self,"set_expression",5):and_then(33)
-					:and_then("set_expression",6):and_then(25)
-					:and_then("set_expression",5):and_then(20)
-					:and_then("set_expression",1):and_then(30)
-					:and_then(function()
-						self.right_hand:tap_mirror(self)
-					end):and_then(10)
-					:and_then("don_top_hat"):and_then(10)
-			end
+		intro=function(self)
+			return self:promise(50)
+				:and_then(self.left_hand,"appear"):and_then(30)
+				:and_then("set_pose",4):and_then(6)
+				:and_then("set_pose",5):and_then(6)
+				:and_then("set_pose",4):and_then(6)
+				:and_then("set_pose",5):and_then(6)
+				:and_then("set_pose",4):and_then(10)
+				:and_then(self.right_hand,"appear"):and_then(15)
+				:and_then("grab_mirror_handle",self):and_then(5)
+				:and_then(self,"set_expression",5):and_then(33)
+				:and_then("set_expression",6):and_then(25)
+				:and_then("set_expression",5):and_then(33)
+				:and_then("set_expression",1):and_then(30)
+				:and_then(function()
+					self.left_hand:tap_mirror(self)
+				end):and_then(10)
+				:and_then("don_top_hat")
+				:and_then(30)
+		end,
+		skip_to_fight=function(self)
+			self:set_expression(1)
+			self:don_top_hat()
+			self.right_hand:appear()
+			self.left_hand:appear()
+			return self:promise(5)
 		end,
 		decide_next_action=function(self)
-			local promise=self:shoot_lasers()
+			local promise=self:promise(1)
+			if boss_health.phase==1 then
+				local r=2*rnd_int(0,2)+1
+				promise=self:promise("set_held_state","right")
+					:and_then("throw_cards","left",r)
+					:and_then("return_to_ready_position",nil,"left")
+					:and_then("throw_cards","right",r)
+					:and_then("return_to_ready_position",nil,"left")
+					:and_then("shoot_lasers")
+					:and_then("return_to_ready_position",nil,"right")
+			elseif boss_health.phase==2 then
+				promise=self:promise("conjure_flowers",3)
+					:and_then("return_to_ready_position")
+					:and_then("throw_cards",nil,rnd_int(1,5))
+					:and_then("return_to_ready_position")
+					:and_then("despawn_coins")
+					:and_then("throw_coins",3)
+					:and_then("return_to_ready_position")
+					:and_then("shoot_lasers")
+					:and_then("return_to_ready_position")
+			elseif boss_health.phase==3 then
+				-- todo 3 repeated batches of flowers
+				promise=self:promise("shoot_lasers")
+					:and_then("return_to_ready_position")
+					:and_then("throw_cards",nil,rnd_int(1,5))
+					:and_then("return_to_ready_position")
+					:and_then("conjure_flowers",3)
+					:and_then("return_to_ready_position")
+					:and_then("despawn_coins")
+					:and_then("throw_coins",3)
+					:and_then("return_to_ready_position")
+			elseif boss_health.phase==4 then
+				-- todo
+			end
+			-- =self:reel() -- self:shoot_lasers()
 			-- local promise=self:conjure_flowers(3)
 			-- local promise=self:throw_cards("right",4)
 			-- local promise=self:throw_coins(3,3)
 			return promise
-				:and_then("return_to_ready_position")
 				:and_then(function()
 					-- called this way so that the progressive decide_next_action
 					--   calls don't result in an out of memory exception
 					self:decide_next_action()
 				end)
+		end,
+		phase_change=function(self)
+			boss_health.phase+=1
+			boss_health.health=0
+			spawn_magic_tile(140)
+			if boss_health.phase==3 then
+				return self:cast_reflection()
+			else
+				return self:promise(10)
+			end
+		end,
+		cancel_everything=function(self)
+			self.left_hand:cancel_everything()
+			self.right_hand:cancel_everything()
+			self:cancel_promises()
+			self.vx,self.vy,self.movement=0,0 -- ,nil
+			self.hover_frames=0
+			self.laser_charge_frames=0
+			self.laser_preview_frames=0
+			foreach(entities,function(entity)
+				if entity.is_boss_generated then
+					entity:despawn()
+				end
+			end)
+			foreach(new_entities,function(entity)
+				if entity.is_boss_generated then
+					entity:despawn()
+				end
+			end)
 		end,
 		-- cancel_actions=function(self)
 			-- cancel any boss-related promises
@@ -753,6 +825,35 @@ local entity_classes={
 			-- end)
 		-- end,
 		-- medium-level commands
+		reel=function(self)
+			local promise=self:promise("set_expression",8)
+				:and_then("set_all_idle",false)
+				:and_then(function()
+					self.left_hand:appear()
+					self.left_hand:set_pose(3)
+					self.right_hand:appear()
+					self.right_hand:set_pose(3)
+				end)
+			local i
+			for i=1,8 do
+				promise=promise
+					:and_then(self,function()
+						freeze_and_shake_screen(0,3)
+						self:poof(rnd_int(-15,15),rnd_int(-15,15))
+						self.left_hand:move(rnd_int(-8,8),rnd_int(-8,8),6,ease_out,nil,true)
+						self.right_hand:move(rnd_int(-8,8),rnd_int(-8,8),6,ease_out,nil,true)
+						return self:move(rnd_int(-8,8),rnd_int(-5,2),6,ease_out,nil,true)
+					end)
+			end
+			-- local i
+			-- for i=1,5 do
+			-- 	promise=promise:and_then("poof",rnd_int(-10,10),rnd_int(-10,10))
+			-- end
+			return promise
+				:and_then(10)
+				:and_then("set_expression",5)
+				:and_then(20)
+		end,
 		conjure_flowers=function(self,density)
 			-- generate a list of flower locations
 			local flowers,i,safe_tile={},rnd_int(0,density),rnd_int(0,39)
@@ -859,15 +960,15 @@ local entity_classes={
 				:and_then(self.right_hand,"set_pose",5)
 				:and_then(self)
 		end,
-		return_to_ready_position=function(self)
+		return_to_ready_position=function(self,expression,held_hand)
 			self.left_hand.holding_wand=false
-			return self:promise("set_expression",1)
+			return self:promise("set_expression",expression or 1)
 				:and_then(self.left_hand,"set_pose",3)
 				:and_then(self.right_hand,"set_pose",3)
 				:and_then(self.left_hand,"set_idle",true)
 				:and_then(self.right_hand,"set_idle",true)
 				:and_then(self,"set_idle",true)
-				:and_then(self,"move_to_home")
+				:and_then(self,"move_to_home",held_hand)
 				:and_then(function()
 					if not self.left_hand.visible then
 						self.left_hand:appear()
@@ -876,13 +977,13 @@ local entity_classes={
 						self.right_hand:appear()
 					end
 				end)
-				:and_then("set_held_state",nil)
+				:and_then("set_held_state",held_hand)
 		end,
-		move_to_home=function(self)
+		move_to_home=function(self,held_hand)
 			local promise=self:promise()
 			local dx,dy=40-self.x,-28-self.y
 			if dx>10 or dy>10 then
-				promise=promise:and_then("set_held_state","either")
+				promise=promise:and_then("set_held_state",held_hand or "either")
 			end
 			return promise:and_then(function()
 					local promises={}
@@ -1034,7 +1135,8 @@ local entity_classes={
 		end,
 		-- highest-level commands
 		throw_cards=function(self,heart_row)
-			local promise=self:promise("set_idle",false)
+			local promise=self:promise(11-self.dir*11)
+				:and_then("set_idle",false)
 			local i
 			for i=ternary(self.is_right_hand,1,2),5,2 do
 				promise=promise:and_then("throw_card_at_row",i,i==heart_row)
@@ -1048,6 +1150,12 @@ local entity_classes={
 				:and_then(function()
 					self.held_mirror={mirror,2*self.dir,13}
 				end)
+		end,
+		cancel_everything=function(self)
+			self:cancel_promises()
+			self.holding_wand=false
+			self.held_mirror=nil
+			self.vx,self.vy,self.movement=0,0 -- ,nil
 		end,
 		tap_mirror=function(self,mirror)
 			self:promise(9)
@@ -1227,13 +1335,16 @@ function init_game()
 	player_reflection=nil
 	boss=nil
 	boss_health=spawn_entity("boss_health")
-	if speed_mode then
+	if beginning_phase>0 then
 		boss=spawn_entity("magic_mirror")
 		boss.visible=true
-		player_health.visible=true
+		-- player_health.visible=true
 		boss_health.visible=true
-		boss:intro(true):and_then("return_to_ready_position"):and_then("decide_next_action")
-		spawn_magic_tile()
+		boss_health.phase=beginning_phase-1
+		boss:promise("skip_to_fight")
+			:and_then("phase_change")
+			:and_then("return_to_ready_position")
+			:and_then("decide_next_action")
 	else
 		-- start the slow intro to the game
 		spawn_entity("instructions")
@@ -1390,6 +1501,8 @@ function draw_ui()
 		-- draw timer
 		print("17:03",101,120)
 	end
+	-- debug phase number
+	print(boss_health.phase,98,3,1)
 	-- draw ui entities
 	pal()
 	foreach(entities,function(entity)
@@ -1626,10 +1739,10 @@ end
 -- magic tile functions
 function on_magic_tile_picked_up(tile)
 	if boss_health.health<60 then
-		spawn_magic_tile(100-min(tile.frames_alive,30)) -- 30 frame grace period
+		spawn_magic_tile(ternary(boss_health.phase<1,80,100)-min(tile.frames_alive,30)) -- 30 frame grace period
 	end
-	if not speed_mode then
-		tiles_collected=increment_counter(tiles_collected)
+	tiles_collected=increment_counter(tiles_collected)
+	if boss_health.phase==0 then
 		if tiles_collected==2 then
 			boss_health.visible=true
 		elseif tiles_collected==4 then
@@ -1637,7 +1750,18 @@ function on_magic_tile_picked_up(tile)
 		elseif tiles_collected==5 then
 			boss.visible=true
 		elseif tiles_collected==6 then
-			boss:intro()
+			boss:promise("intro")
+				:and_then("phase_change")
+				:and_then("return_to_ready_position",nil,"right")
+				:and_then("decide_next_action")
+		end
+	elseif boss_health.phase>0 then
+		if boss_health.health>=60 then
+			boss:cancel_everything()
+			boss:promise("reel")
+				:and_then("phase_change")
+				:and_then("return_to_ready_position",2)
+				:and_then(boss,"decide_next_action")
 		end
 	end
 end
@@ -1949,20 +2073,20 @@ __gfx__
 00000000000000000000000000000000000000000000000000000000000111111111155555130775770033677777763300777770330777757033000099f00003
 00000000000000000000000000000000000000000000000000000000000110000000155155130077700033000000003300077700330677776033000049900003
 00000000000000000000000000000000000000000000000000000000000113333333115551133336333333333333333333336333333333333333333334333333
-00000000000000000000000000000000000000000000000000033336663333333366633333333666333333337773333333376633333333cbb333333336663333
-000000000000000000000000000000000000000000000000000306666666033066666660330777777703307777776033067667770330accbbee0330666666603
-00000000000000000000000000000000000000000000000000037777777773377766677733ddd777ddd337777766773367677676733aaccbbee83377777dd773
-0000000000000000000000000000000000000000000000000003ddd777ddd3377777777733777777777337776677663377676767633aaccbbee833dd77777d73
-0000000000000000000000000000000000000000000000000007777777777777dd777dd7777d77777d7777667766666676766766776aaccbbee8877777777777
-00000000000000000000000000000000000000000000000000077d77777d777776d7d67777d7d777d7d766776666677767677677666aaccbbee887d77777d776
-0000000000000000000000000000000000000000000000000007d7d777d7d7777777777777777777777777666667777677676766776aaccbbee88d7d777d7d76
-00000000000000000000000000000000000000000000000000077d77777d777d7d777d7d777ddddddd7766666777776767767777676aaccbbee887d77777d777
-0000000000000000000000000000000000000000000000000007777777777777d77777d7777ddddddd7766677777667776776767766aaccbbee8877777777777
-00000000000000000000000000000000000000000000000000077d77777d777777777777777ddddddd776777776677767676767766111ee11cc117777dd77777
-01230000000000000000000000000000000000000000000000037ddddddd73377ddddd773377ddddd7733777667777336766676673311ee11cc1337dddd77773
-45670000000000000000000000000000000000000000000000036777777763377d777d7733667777766337667777773376776767633ddddddddd336777777763
-89a300000000000000000000000000000000000000000000000306677766033077777770330666666603307777777033076776670330ddddddd0330667776603
-cdef0000000000000000000000000000000000000000000000033336663333333366633333333666333333337773333333376733333333ddd333333336663333
+000000000000000000000000000000000000000033336663333333366633333333666333333337773333333376633333333cbb33333333666333333336663333
+0000000000000000000000000000000000000000306666666033066666660330777777703307777776033067667770330accbbee033066666660330777777703
+000000000000000000000000000000000000000037777777773377766677733ddd777ddd337777766773367677676733aaccbbee83377777dd7733ddd777ddd3
+00000000000000000000000000000000000000003ddd777ddd3377777777733777777777337776677663377676767633aaccbbee833dd77777d7337777777773
+00000000000000000000000000000000000000007777777777777dd777dd7777d77777d7777667766666676766766776aaccbbee887777777777777d77777d77
+000000000000000000000000000000000000000077d77777d777776d7d67777d7d777d7d766776666677767677677666aaccbbee887d77777d7767ddd777ddd7
+00000000000000000000000000000000000000007d7d777d7d7777777777777777777777777666667777677676766776aaccbbee88d7d777d7d7677d77777d77
+000000000000000000000000000000000000000077d77777d777d7d777d7d777ddddddd7766666777776767767777676aaccbbee887d77777d77777777777777
+00000000000000000000000000000000000000007777777777777d77777d7777ddddddd7766677777667776776767766aaccbbee8877777777777777ddddd777
+000000000000000000000000000000000000000077d77777d777777777777777ddddddd776777776677767676767766111ee11cc117777dd7777777ddddddd77
+012300000000000000000000000000000000000037ddddddd73377ddddd773377ddddd7733777667777336766676673311ee11cc1337dddd7777337d77777d73
+456700000000000000000000000000000000000036777777763377d777d7733667777766337667777773376776767633ddddddddd33677777776336777777763
+89a3000000000000000000000000000000000000306677766033077777770330666666603307777777033076776670330ddddddd033066777660330666666603
+cdef00000000000000000000000000000000000033336663333333366633333333666333333337773333333376733333333ddd33333333666333333336663333
 
 __gff__
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
