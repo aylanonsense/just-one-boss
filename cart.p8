@@ -31,7 +31,7 @@ local color_ramps={}
 local rainbow_color
 
 -- global config vars
-local beginning_phase=3
+local beginning_phase=4
 local tiles_collected
 
 -- global scene vars
@@ -49,6 +49,7 @@ local player
 local player_health
 local player_reflection
 local boss
+local boss_reflection
 local boss_health
 local entities
 local new_entities
@@ -506,6 +507,7 @@ local entity_classes={
 	flower_patch={
 		render_layer=4,
 		is_boss_generated=true,
+		hittable_frames=0,
 		init=function(self)
 			local c=rnd_int(1,3)
 			self.color=({8,14,15})[c]
@@ -513,7 +515,7 @@ local entity_classes={
 			self.flipped=rnd()<0.5
 		end,
 		update=function(self)
-			self.hitbox_channel=ternary(self.frames_to_death==35,1,0) -- player
+			self.hitbox_channel=ternary(self.frames_to_death>self.hittable_frames,1,0) -- player
 		end,
 		draw=function(self)
 			pal2(4)
@@ -522,7 +524,8 @@ local entity_classes={
 			sspr2(9*ceil(self.frames_to_death/34)+88,85,9,8,self.x-4,self.y-4,self.flipped)
 		end,
 		bloom=function(self)
-			self.frames_to_death=38
+			self.frames_to_death=ternary(boss_health.phase==4,10,38)
+			self.hittable_frames=self.frames_to_death-3
 			local i
 			for i=0,1 do
 				spawn_entity("particle",self.x,self.y-2,{
@@ -615,9 +618,12 @@ local entity_classes={
 		end
 	},
 	magic_mirror={
+		render_layer=7,
 		extends="movable",
 		x=40,
 		y=-28,
+		home_x=40,
+		home_y=-28,
 		expression=4,
 		laser_charge_frames=0,
 		laser_preview_frames=0,
@@ -628,8 +634,8 @@ local entity_classes={
 		init=function(self)
 			self.coins={}
 			self.flowers={}
-			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,self.y+5)
-			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,self.y+5,{is_right_hand=true,dir=1})
+			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,self.y+5,{is_reflection=self.is_reflection})
+			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,self.y+5,{is_right_hand=true,dir=1,is_reflection=self.is_reflection})
 		end,
 		update=function(self)
 			if self.is_idle then
@@ -657,6 +663,14 @@ local entity_classes={
 		end,
 		draw=function(self)
 			local x,y=self.x+self.idle_x,self.y+self.idle_y
+			if self.is_reflection then
+				local i
+				for i=1,15 do
+					pal2(i,3)
+				end
+				pal2(7,11)
+				pal2(6,11)
+			end
 			pal2(3)
 			if self.visible then
 				-- draw mirror
@@ -667,17 +681,21 @@ local entity_classes={
 				end
 			end
 			if boss_health.rainbow_frames>0 then
-				local i
-				for i=1,15 do
-					pal2(i,16)
+				if not self.is_reflection then
+					local i
+					for i=1,15 do
+						pal2(i,16)
+					end
+					if self.expression>0 and self.expression!=5 and self.expression!=4 then
+						pal2(13,16,-1)
+					end
+					pal2(3)
 				end
-				if self.expression>0 and self.expression!=5 and self.expression!=4 then
-					pal2(13,16,-1)
-				end
-				pal2(3)
 				sspr2(117,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
-				pal()
-				pal2(3)
+				if not self.is_reflection then
+					pal()
+					pal2(3)
+				end
 			end
 			if self.visible then
 				-- draw top hat
@@ -751,7 +769,34 @@ local entity_classes={
 					:and_then("throw_coins",3)
 					:and_then("return_to_ready_position")
 			elseif boss_health.phase==4 then
-				-- todo
+				promise=self:promise(all_promises(
+						{self,"set_held_state",nil},
+						{boss_reflection,"set_held_state",nil}
+					))
+					:and_then(function()
+						boss_reflection:promise("return_to_ready_position")
+							:and_then(24)
+							:and_then("conjure_flowers",3)
+							:and_then("return_to_ready_position")
+						return self:promise("conjure_flowers",3)
+							:and_then(17)
+							:and_then("conjure_flowers",3)
+							:and_then("return_to_ready_position")
+					end)
+					:and_then(function()
+						boss_reflection:promise("shoot_lasers")
+							:and_then("return_to_ready_position")
+						return self:promise("throw_cards",nil,rnd_int(1,5))
+							:and_then("return_to_ready_position")
+							:and_then(100)
+					end)
+					:and_then(function()
+						boss_reflection:promise("throw_coins",3)
+							:and_then("return_to_ready_position")
+						return self:promise("throw_coins",3)
+							:and_then("return_to_ready_position")
+							:and_then(100)
+					end)
 			end
 			-- =self:reel() -- self:shoot_lasers()
 			-- local promise=self:conjure_flowers(3)
@@ -771,9 +816,15 @@ local entity_classes={
 			if boss_health.phase==3 then
 				return self:promise("return_to_ready_position",2)
 					:and_then("cast_reflection",false)
+					:and_then("return_to_ready_position")
+					:and_then(60)
 			elseif boss_health.phase==4 then
-				return self:promise("return_to_ready_position",2)
+				local promise=self:promise("return_to_ready_position",2)
 					:and_then("cast_reflection",true)
+				promise:and_then(function()
+					boss_reflection:promise("return_to_ready_position",1,"right")
+				end)
+				return promise:and_then("return_to_ready_position",1,"left")
 			else
 				return self:promise(10)
 			end
@@ -863,12 +914,13 @@ local entity_classes={
 				:and_then("set_expression",2)
 			-- spawn the flowers
 			self.flowers={}
+			local promise2=promise
 			for i=1,#flowers do
-				promise=promise:and_then("spawn_flower",flowers[i][1],flowers[i][2])
+				promise2=promise2:and_then("spawn_flower",flowers[i][1],flowers[i][2])
 			end
 			-- bloom the flowers
 			return promise
-				:and_then(30)
+				:and_then(40)
 				:and_then("bloom_flowers")
 				:and_then(30)
 		end,
@@ -880,16 +932,16 @@ local entity_classes={
 			end
 			return promise:and_then(self.left_hand,"cast_spell")
 				:and_then(self,"set_expression",3)
+				:and_then(5)
 				:and_then(function()
 					if upgraded_version then
-						-- todo
+						boss_reflection=spawn_entity("magic_mirror_reflection")
+						self.home_x+=20
 					else
 						player_reflection=spawn_entity("player_reflection")
 					end
 				end)
-				:and_then(60)
-				:and_then("return_to_ready_position")
-				:and_then(60)
+				:and_then(55)
 		end,
 		summon_wands=function(self,right_hand_too)
 			local promise=self:promise("set_all_idle",false)
@@ -987,20 +1039,20 @@ local entity_classes={
 		end,
 		move_to_home=function(self,held_hand)
 			local promise=self:promise()
-			local dx,dy=40-self.x,-28-self.y
-			if dx>10 or dy>10 then
+			local dx,dy=self.home_x-self.x,self.home_y-self.y
+			if abs(dx)>10 or abs(dy)>10 then
 				promise=promise:and_then("set_held_state",held_hand or "either")
 			end
 			return promise:and_then(function()
 					local promises={}
-					if self.x!=40 and self.y!=-28 then
-						add(promises,{self,"move",40,-28,30,ease_in})
+					if self.x!=self.home_x or self.y!=self.home_y then
+						add(promises,{self,"move",self.home_x,self.home_y,30,ease_in})
 					end
 					if not self.left_hand.held_mirror and self.left_hand.x!=22 and self.left_hand!=-23 then
-						add(promises,{self.left_hand,"move",22,-23,30,ease_in,{-10,-10,-20,0}})
+						add(promises,{self.left_hand,"move",self.home_x-18,self.home_y+5,30,ease_in,{-10,-10,-20,0}})
 					end
 					if not self.right_hand.held_mirror and self.right_hand.x!=58 and self.right_hand!=-23 then
-						add(promises,{self.right_hand,"move",58,-23,30,ease_in,{10,-10,20,0}})
+						add(promises,{self.right_hand,"move",self.home_x+18,self.home_y+5,30,ease_in,{10,-10,20,0}})
 					end
 					return all_promises(unpack(promises))()
 				end)
@@ -1068,7 +1120,7 @@ local entity_classes={
 		end,
 		spawn_flower=function(self,x,y)
 			add(self.flowers,spawn_entity("flower_patch",x,y))
-			return 2
+			return 1
 		end,
 		spawn_coin=function(self,has_heart)
 			add(self.coins,spawn_entity("coin",self.x+12,self.y,{has_heart=has_heart}))
@@ -1085,10 +1137,30 @@ local entity_classes={
 			self.expression=expression
 		end,
 	},
+	magic_mirror_reflection={
+		render_layer=5,
+		extends="magic_mirror",
+		visible=true,
+		expression=1,
+		is_wearing_top_hat=true,
+		home_x=20,
+		is_reflection=true,
+		init=function(self)
+			self:super_init()
+			self.left_hand.visible=true
+			self.left_hand.pose=boss.left_hand.pose
+			self.left_hand.x=boss.left_hand.x
+			self.left_hand.y=boss.left_hand.y
+			self.right_hand.visible=true
+			self.right_hand.pose=boss.right_hand.pose
+			self.right_hand.x=boss.right_hand.x
+			self.right_hand.y=boss.right_hand.y
+		end
+	},
 	magic_mirror_hand={
 		-- is_right_hand,dir
 		extends="movable",
-		render_layer=7,
+		render_layer=8,
 		pose=3,
 		dir=-1,
 		held_mirror=nil,
@@ -1096,6 +1168,9 @@ local entity_classes={
 		idle_x=0,
 		idle_y=0,
 		update=function(self)
+			if self.is_reflection then
+				self.render_layer=6
+			end
 			if self.is_idle then
 				self.idle_mult=min(self.idle_mult+0.05,1)
 			else
@@ -1116,7 +1191,14 @@ local entity_classes={
 		draw=function(self)
 			local x,y=self.x+self.idle_x,self.y+self.idle_y
 			if self.visible then
-				if boss_health.rainbow_frames>0 then
+				if self.is_reflection then
+					local i
+					for i=1,15 do
+						pal2(i,3)
+					end
+					pal2(7,11)
+					pal2(6,11)
+				elseif boss_health.rainbow_frames>0 then
 					local i
 					for i=1,15 do
 						pal2(i,16)
@@ -1342,6 +1424,7 @@ function init_game()
 	player_health=spawn_entity("player_health")
 	player_reflection=nil
 	boss=nil
+	boss_reflection=nil
 	boss_health=spawn_entity("boss_health")
 	if beginning_phase>0 then
 		boss=spawn_entity("magic_mirror")
@@ -1349,6 +1432,9 @@ function init_game()
 		-- player_health.visible=true
 		boss_health.visible=true
 		boss_health.phase=beginning_phase-1
+		if beginning_phase>3 then
+			player_reflection=spawn_entity("player_reflection")
+		end
 		boss:promise("skip_to_fight")
 			:and_then("phase_change")
 			:and_then("return_to_ready_position")
