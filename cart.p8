@@ -31,7 +31,7 @@ local color_ramps={}
 local rainbow_color
 
 -- global config vars
-local beginning_phase=1
+local beginning_phase=3
 local tiles_collected
 
 -- global scene vars
@@ -372,7 +372,7 @@ local entity_classes={
 			end
 		end,
 		gain_health=function(self)
-			local health=10
+			local health=ternary(self.phase<1,10,7)
 			self.health=mid(0,self.health+health,60)
 			self.rainbow_frames=15+(self.health-self.visible_health)
 		end
@@ -624,8 +624,6 @@ local entity_classes={
 		idle_mult=0,
 		idle_x=0,
 		idle_y=0,
-		hover_frames=0,
-		hover_dir=1,
 		visible=false,
 		init=function(self)
 			self.coins={}
@@ -643,19 +641,6 @@ local entity_classes={
 			self.idle_y=self.idle_mult*2*sin(self.frames_alive/30)
 			decrement_counter_prop(self,"laser_charge_frames")
 			decrement_counter_prop(self,"laser_preview_frames")
-			if decrement_counter_prop(self,"hover_frames") then
-				self.vx=0
-				self.vy=0
-			end
-			-- hover left and right
-			if self.hover_frames>0 then
-				if self.x<=5 then
-					self.hover_dir=1
-				elseif self.x>=75 then
-					self.hover_dir=-1
-				end
-				self.vx,self.vy=2*self.hover_dir,0
-			end
 			self:apply_move()
 			self:apply_velocity()
 			-- create particles when charging laser
@@ -784,7 +769,11 @@ local entity_classes={
 			boss_health.health=0
 			spawn_magic_tile(140)
 			if boss_health.phase==3 then
-				return self:cast_reflection()
+				return self:promise("return_to_ready_position",2)
+					:and_then("cast_reflection",false)
+			elseif boss_health.phase==4 then
+				return self:promise("return_to_ready_position",2)
+					:and_then("cast_reflection",true)
 			else
 				return self:promise(10)
 			end
@@ -794,7 +783,6 @@ local entity_classes={
 			self.right_hand:cancel_everything()
 			self:cancel_promises()
 			self.vx,self.vy,self.movement=0,0 -- ,nil
-			self.hover_frames=0
 			self.laser_charge_frames=0
 			self.laser_preview_frames=0
 			foreach(entities,function(entity)
@@ -884,9 +872,29 @@ local entity_classes={
 				:and_then("bloom_flowers")
 				:and_then(30)
 		end,
-		cast_reflection=function(self)
-			local promise=self:promise("set_expression",2)
-				:and_then(self.left_hand,"move",23,10,20,ease_in,nil,true)
+		cast_reflection=function(self,upgraded_version)
+			local promise=self:promise("summon_wands",upgraded_version)
+				:and_then(30)
+			if upgraded_version then
+				promise:and_then(self.right_hand,"cast_spell")
+			end
+			return promise:and_then(self.left_hand,"cast_spell")
+				:and_then(self,"set_expression",3)
+				:and_then(function()
+					if upgraded_version then
+						-- todo
+					else
+						player_reflection=spawn_entity("player_reflection")
+					end
+				end)
+				:and_then(60)
+				:and_then("return_to_ready_position")
+				:and_then(60)
+		end,
+		summon_wands=function(self,right_hand_too)
+			local promise=self:promise("set_all_idle",false)
+				:and_then("set_expression",2)
+				:and_then(self.left_hand,"move",23,14,20,ease_in,nil,true)
 				:and_then("set_pose",1)
 			local i
 			for i=1,2 do
@@ -894,19 +902,15 @@ local entity_classes={
 					:and_then(self.right_hand,"move",-10,0,20,linear,{0,-3,0,-3},true)
 					:and_then("move",10,0,20,linear,{0,3,0,3},true)
 			end
+			if right_hand_too then
+				promise
+					:and_then(self.right_hand,"set_pose",1)
+					:and_then("summon_wand")
+			end
 			return promise
 				:and_then(self,"set_expression",1)
 				:and_then(self.left_hand,"summon_wand")
-				:and_then(30)
-				:and_then("move",-20,-14,12,ease_out,{-20,20,0,20},true)
-				:and_then("set_pose",6)
-				:and_then(self,"set_expression",3)
-				:and_then(function()
-					spawn_particle_burst(self.x-14,self.y-13,20,3,15)
-					freeze_and_shake_screen(0,20)
-					player_reflection=spawn_entity("player_reflection")
-				end)
-				:and_then(30)
+				:and_then(self)
 		end,
 		throw_cards=function(self,hand,heart_row)
 			local promises={}
@@ -937,17 +941,18 @@ local entity_classes={
 		end,
 		shoot_lasers=function(self)
 			self.left_hand:disapper()
-			return self:promise("set_held_state","right")
+			local promise=self:promise("set_held_state","right")
 				:and_then("set_expression",5)
 				:and_then("set_all_idle",false)
-				:and_then("move",10*player:col()-5,-20,20,ease_in)
-				:and_then("fire_laser")
-				:and_then("hover",5)
-				:and_then(10)
-				:and_then("fire_laser")
-				:and_then("hover",5)
-				:and_then(10)
-				:and_then("fire_laser")
+			local i
+			local col=rnd_int(0,7)
+			for i=1,3 do
+				col=(col+rnd_int(2,6))%8
+				promise=promise
+					:and_then("move",10*col+5,-20,15,ease_in,{0,-10,0,-10})
+					:and_then("fire_laser")
+			end
+			return promise
 		end,
 		-- lowest-level commands
 		bloom_flowers=function(self)
@@ -962,6 +967,7 @@ local entity_classes={
 		end,
 		return_to_ready_position=function(self,expression,held_hand)
 			self.left_hand.holding_wand=false
+			self.right_hand.holding_wand=false
 			return self:promise("set_expression",expression or 1)
 				:and_then(self.left_hand,"set_pose",3)
 				:and_then(self.right_hand,"set_pose",3)
@@ -1024,14 +1030,13 @@ local entity_classes={
 			end
 		end,
 		fire_laser=function(self)
-			return self:promise("charge_laser",14)
+			return self:promise("charge_laser",10)
 				:and_then(4)
-				:and_then("preview_laser",10)
-				:and_then("set_expression",0)
-				:and_then("spawn_laser",20)
-				:and_then("set_expression",5)
 				:and_then("preview_laser",6)
-				:and_then(20)
+				:and_then("set_expression",0)
+				:and_then("spawn_laser",14)
+				:and_then("set_expression",5)
+				:and_then("preview_laser",4)
 		end,
 		charge_laser=function(self,frames)
 			self.laser_charge_frames=frames
@@ -1044,10 +1049,6 @@ local entity_classes={
 		preview_laser=function(self,frames)
 			self.laser_preview_frames=frames
 			return frames
-		end,
-		hover=function(self,cols)
-			self.hover_frames=5*cols+1
-			return 5*cols
 		end,
 		despawn_coins=function(self)
 			local i
@@ -1126,22 +1127,38 @@ local entity_classes={
 				sspr2(12*self.pose-12,51,12,11,x-ternary(self.is_right_hand,7,4),y-8,self.is_right_hand)
 				if self.holding_wand then
 					if self.pose==1 then
-						sspr2(64,30,7,13,x+4,y-8)
+						sspr2(64,30,7,13,x+ternary(self.is_right_hand,-10,4),y-8,self.is_right_hand)
 					else
-						sspr2(71,30,7,13,x-2,y-16)
+						sspr2(71,30,7,13,x-ternary(self.is_right_hand,3,2),y-16,self.is_right_hand)
 					end
 				end
 			end
 		end,
 		-- highest-level commands
 		throw_cards=function(self,heart_row)
-			local promise=self:promise(11-self.dir*11)
+			local promise=self:promise(13-self.dir*13)
 				:and_then("set_idle",false)
 			local i
 			for i=ternary(self.is_right_hand,1,2),5,2 do
 				promise=promise:and_then("throw_card_at_row",i,i==heart_row)
 			end
 			return promise
+		end,
+		cast_spell=function(self)
+			return self:promise("move",40+20*self.dir,-30,12,ease_out,{-20,20,0,20},false)
+				:and_then("set_pose",6)
+				:and_then(function()
+					spawn_particle_burst(self.x,self.y-20,20,3,10)
+					freeze_and_shake_screen(0,20)
+				end)
+		end,
+		throw_card_at_row=function(self,row,has_heart)
+			return self:promise("move_to_row",row):and_then(12)
+				:and_then("set_pose",1):and_then("spawn_card",has_heart):and_then(12)
+				:and_then("set_pose",2):and_then(8)
+		end,
+		spawn_card=function(self,has_heart)
+			spawn_entity("playing_card",self.x-10*self.dir,self.y,{vx=-self.dir,has_heart=has_heart})
 		end,
 		grab_mirror_handle=function(self,mirror)
 			return self:promise("set_pose",3)
@@ -1168,15 +1185,10 @@ local entity_classes={
 		end,
 		summon_wand=function(self)
 			self.holding_wand=true
-			return self:promise("poof",10)
+			return self:promise("poof",-10*self.dir)
 		end,
 		set_idle=function(self,idle)
 			self.is_idle=idle
-		end,
-		throw_card_at_row=function(self,row,has_heart)
-			return self:promise("move_to_row",row):and_then(10)
-				:and_then("set_pose",1):and_then("spawn_card",has_heart):and_then(10)
-				:and_then("set_pose",2):and_then(4)
 		end,
 		release_mirror=function(self)
 			self.held_mirror=nil
@@ -1200,7 +1212,6 @@ local entity_classes={
 				:and_then("move",40+50*self.dir,8*row-4,20,ease_in_out,{10*self.dir,-10,10*self.dir,10})
 				:and_then("set_pose",2)
 		end,
-		-- lowest-level commands
 		set_pose=function(self,pose)
 			if not self.held_mirror then
 				self.pose=pose
@@ -1209,9 +1220,6 @@ local entity_classes={
 		poof=function(self,dx,dy)
 			spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
 			return 12
-		end,
-		spawn_card=function(self,has_heart)
-			spawn_entity("playing_card",self.x-10*self.dir,self.y,{vx=-self.dir,has_heart=has_heart})
 		end,
 		--
 		-- move_to_home=function(self,x,y)
@@ -1739,7 +1747,7 @@ end
 -- magic tile functions
 function on_magic_tile_picked_up(tile)
 	if boss_health.health<60 then
-		spawn_magic_tile(ternary(boss_health.phase<1,80,100)-min(tile.frames_alive,30)) -- 30 frame grace period
+		spawn_magic_tile(ternary(boss_health.phase<1,80,120)-min(tile.frames_alive,30)) -- 30 frame grace period
 	end
 	tiles_collected=increment_counter(tiles_collected)
 	if boss_health.phase==0 then
