@@ -31,7 +31,7 @@ local color_ramps={}
 local rainbow_color
 
 -- global config vars
-local beginning_phase=4
+local beginning_phase=3
 local tiles_collected
 
 -- global scene vars
@@ -544,17 +544,16 @@ local entity_classes={
 		is_boss_generated=true,
 		init=function(self)
 			self.target_x,self.target_y=10*player:col()-5,8*player:row()-4
-			self:promise("move",self.target_x+2,self.target_y,30,ease_out,{20,-30,10,-60})
-				:and_then(2)
-				:and_then(function()
+			self:promise_sequence(
+				{"move",self.target_x+2,self.target_y,30,ease_out,{20,-30,10,-60}},2,
+				function()
 					self.hitbox_channel=5 -- player, coin
 					self.occupies_tile=true
 					freeze_and_shake_screen(2,2)
-				end)
-				:and_then("move",-1,-4,3,ease_in,nil,true)
-				:and_then(2)
-				:and_then("move",-1,4,3,ease_out,nil,true)
-				:and_then(function()
+				end,
+				{"move",-1,-4,3,ease_in,nil,true},2,
+				{"move",-1,4,3,ease_out,nil,true},
+				function()
 					self.hitbox_channel=1 -- player
 					self.hurtbox_channel=4 -- coin
 				end)
@@ -710,24 +709,24 @@ local entity_classes={
 		end,
 		-- highest-level commands
 		intro=function(self)
-			return self:promise(50)
-				:and_then(self.left_hand,"appear"):and_then(30)
-				:and_then("set_pose",4):and_then(6)
-				:and_then("set_pose",5):and_then(6)
-				:and_then("set_pose",4):and_then(6)
-				:and_then("set_pose",5):and_then(6)
-				:and_then("set_pose",4):and_then(10)
-				:and_then(self.right_hand,"appear"):and_then(15)
-				:and_then("grab_mirror_handle",self):and_then(5)
-				:and_then(self,"set_expression",5):and_then(33)
-				:and_then("set_expression",6):and_then(25)
-				:and_then("set_expression",5):and_then(33)
-				:and_then("set_expression",1):and_then(30)
-				:and_then(function()
+			return self:promise_sequence(
+				50,
+				{self.left_hand,"appear"},30,
+				{"set_pose",4},6,
+				{"set_pose",5},6,
+				{"set_pose",4},6,
+				{"set_pose",5},6,
+				{"set_pose",4},10,
+				{self.right_hand,"appear"},15,
+				{"grab_mirror_handle",self},5,
+				{self,"set_expression",5},33,
+				{"set_expression",6},25,
+				{"set_expression",5},33,
+				{"set_expression",1},30,
+				{function()
 					self.left_hand:tap_mirror(self)
-				end):and_then(10)
-				:and_then("don_top_hat")
-				:and_then(30)
+				end},10,
+				"don_top_hat",30)
 		end,
 		skip_to_fight=function(self)
 			self:set_expression(1)
@@ -740,68 +739,72 @@ local entity_classes={
 			local promise=self:promise(1)
 			if boss_health.phase==1 then
 				local r=2*rnd_int(0,2)+1
-				promise=self:promise("set_held_state","right")
-					:and_then("throw_cards","left",r)
-					:and_then("return_to_ready_position",nil,"left")
-					:and_then("throw_cards","right",r)
-					:and_then("return_to_ready_position",nil,"left")
-					:and_then("shoot_lasers")
-					:and_then("return_to_ready_position",nil,"right")
+				promise=self:promise_sequence(
+					{"set_held_state","right"},
+					{"throw_cards","left",r},
+					{"return_to_ready_position",nil,"left"},
+					{"throw_cards","right",r},
+					{"return_to_ready_position",nil,"left"},
+					"shoot_lasers",
+					{"return_to_ready_position",nil,"right"})
 			elseif boss_health.phase==2 then
-				promise=self:promise("conjure_flowers",3)
-					:and_then("return_to_ready_position")
-					:and_then("throw_cards",nil,rnd_int(1,5))
-					:and_then("return_to_ready_position")
-					:and_then("despawn_coins")
-					:and_then("throw_coins",3)
-					:and_then("return_to_ready_position")
-					:and_then("shoot_lasers")
-					:and_then("return_to_ready_position")
+				promise=self:promise_sequence(
+					{"conjure_flowers",3},
+					"return_to_ready_position",
+					{"throw_cards",nil,rnd_int(1,5)},
+					"return_to_ready_position",
+					"despawn_coins",
+					{"throw_coins",3},
+					"return_to_ready_position",
+					"shoot_lasers",
+					"return_to_ready_position")
 			elseif boss_health.phase==3 then
 				-- todo 3 repeated batches of flowers
-				promise=self:promise("shoot_lasers")
-					:and_then("return_to_ready_position")
-					:and_then("throw_cards",nil,rnd_int(1,5))
-					:and_then("return_to_ready_position")
-					:and_then("conjure_flowers",3)
-					:and_then("return_to_ready_position")
-					:and_then("despawn_coins")
-					:and_then("throw_coins",3)
-					:and_then("return_to_ready_position")
+				promise=self:promise_sequence(
+					"shoot_lasers",
+					"return_to_ready_position",
+					{"throw_cards",nil,rnd_int(1,5)},
+					"return_to_ready_position",
+					{"conjure_flowers",3},
+					"return_to_ready_position",
+					"despawn_coins",
+					{"throw_coins",3},
+					"return_to_ready_position")
 			elseif boss_health.phase==4 then
-				promise=self:promise(all_promises(
-						{self,"set_held_state",nil},
-						{boss_reflection,"set_held_state",nil}
-					))
+				promise=self:promise_parallel(
+					{self,"set_held_state",nil},
+					{boss_reflection,"set_held_state",nil})
 					:and_then(function()
-						boss_reflection:promise("return_to_ready_position")
-							:and_then(24)
-							:and_then("conjure_flowers",3)
-							:and_then("return_to_ready_position")
-						return self:promise("conjure_flowers",3)
-							:and_then(17)
-							:and_then("conjure_flowers",3)
-							:and_then("return_to_ready_position")
+						boss_reflection:promise_sequence(
+							"return_to_ready_position",
+							24,
+							{"conjure_flowers",3},
+							"return_to_ready_position")
+						return self:promise_sequence(
+							{"conjure_flowers",3},
+							17,
+							{"conjure_flowers",3},
+							"return_to_ready_position")
 					end)
 					:and_then(function()
-						boss_reflection:promise("shoot_lasers")
-							:and_then("return_to_ready_position")
-						return self:promise("throw_cards",nil,rnd_int(1,5))
-							:and_then("return_to_ready_position")
-							:and_then(100)
+						boss_reflection:promise_sequence(
+							"shoot_lasers",
+							"return_to_ready_position")
+						return self:promise_sequence(
+							{"throw_cards",nil,rnd_int(1,5)},
+							"return_to_ready_position",
+							100)
 					end)
 					:and_then(function()
-						boss_reflection:promise("throw_coins",3)
-							:and_then("return_to_ready_position")
-						return self:promise("throw_coins",3)
-							:and_then("return_to_ready_position")
-							:and_then(100)
+						boss_reflection:promise_sequence(
+							{"throw_coins",3},
+							"return_to_ready_position")
+						return self:promise(
+							{"throw_coins",3},
+							"return_to_ready_position",
+							100)
 					end)
 			end
-			-- =self:reel() -- self:shoot_lasers()
-			-- local promise=self:conjure_flowers(3)
-			-- local promise=self:throw_cards("right",4)
-			-- local promise=self:throw_coins(3,3)
 			return promise
 				:and_then(function()
 					-- called this way so that the progressive decide_next_action
@@ -814,17 +817,19 @@ local entity_classes={
 			boss_health.health=0
 			spawn_magic_tile(140)
 			if boss_health.phase==3 then
-				return self:promise("return_to_ready_position",2)
-					:and_then("cast_reflection",false)
-					:and_then("return_to_ready_position")
-					:and_then(60)
+				return self:promise_sequence(
+					{"return_to_ready_position",2},
+					"cast_reflection",
+					"return_to_ready_position",
+					60)
 			elseif boss_health.phase==4 then
-				local promise=self:promise("return_to_ready_position",2)
-					:and_then("cast_reflection",true)
-				promise:and_then(function()
-					boss_reflection:promise("return_to_ready_position",1,"right")
-				end)
-				return promise:and_then("return_to_ready_position",1,"left")
+				return self:promise_sequence(
+					{"return_to_ready_position",2},
+					{"cast_reflection",true},
+					function()
+						boss_reflection:promise("return_to_ready_position",1,"right")
+					end,
+					{"return_to_ready_position",1,"left"})
 			else
 				return self:promise(10)
 			end
@@ -847,51 +852,30 @@ local entity_classes={
 				end
 			end)
 		end,
-		-- cancel_actions=function(self)
-			-- cancel any boss-related promises
-			-- foreach(promises,function(promise)
-			-- 	if promise.ctx==self or promise.ctx==self.left_hand or promise.ctx==self.right_hand then
-			-- 		promise:cancel()
-			-- 	end
-			-- end)
-			-- self.vx,self.vy,self.movement=0,0 -- ,nil
-			-- self.left_hand.vx,self.left_hand.vy,self.left_hand.movement=0,0 -- ,nil
-			-- self.right_hand.vx,self.right_hand.vy,self.right_hand.movement=0,0 -- ,nil
-			-- foreach(entities,function(entity)
-			-- 	if entity.is_boss_generated then
-			-- 		entity:despawn()
-			-- 	end
-			-- end)
-		-- end,
 		-- medium-level commands
 		reel=function(self)
-			local promise=self:promise("set_expression",8)
-				:and_then("set_all_idle",false)
-				:and_then(function()
-					self.left_hand:appear()
-					self.left_hand:set_pose(3)
-					self.right_hand:appear()
-					self.right_hand:set_pose(3)
-				end)
+			local promise=self:promise_sequence(
+				{"set_expression",8},
+				{"set_all_idle",false})
+				:and_then_parallel(
+					self.left_hand:promise_sequence({"set_pose",3},"appear"),
+					self.right_hand:promise_sequence({"set_pose",3},"appear")
+				)
 			local i
 			for i=1,8 do
-				promise=promise
-					:and_then(self,function()
+				promise=promise_sequence(
+					function()
 						freeze_and_shake_screen(0,3)
 						self:poof(rnd_int(-15,15),rnd_int(-15,15))
 						self.left_hand:move(rnd_int(-8,8),rnd_int(-8,8),6,ease_out,nil,true)
 						self.right_hand:move(rnd_int(-8,8),rnd_int(-8,8),6,ease_out,nil,true)
-						return self:move(rnd_int(-8,8),rnd_int(-5,2),6,ease_out,nil,true)
-					end)
+					end,
+					{"move",rnd_int(-8,8),rnd_int(-5,2),6,ease_out,nil,true})
 			end
-			-- local i
-			-- for i=1,5 do
-			-- 	promise=promise:and_then("poof",rnd_int(-10,10),rnd_int(-10,10))
-			-- end
-			return promise
-				:and_then(10)
-				:and_then("set_expression",5)
-				:and_then(20)
+			return promise:and_then_sequence(
+				10,
+				{"set_expression",5},
+				20)
 		end,
 		conjure_flowers=function(self,density)
 			-- generate a list of flower locations
@@ -904,13 +888,13 @@ local entity_classes={
 			end
 			shuffle_list(flowers)
 			-- concentrate
-			local promise=self:promise(self.left_hand,"set_idle",false)
-				:and_then(self.right_hand,"set_idle",false)
-				:and_then(self,"set_idle",false)
-				:and_then(all_promises(
+			local promise=self:promise_sequence(
+				{self.left_hand,"set_idle",false},
+				{self.right_hand,"set_idle",false},
+				{self,"set_idle",false})
+				:and_then_parallel(
 					{self.left_hand,"move_to_temple",self},
-					{self.right_hand,"move_to_temple",self}
-				))
+					{self.right_hand,"move_to_temple",self})
 				:and_then("set_expression",2)
 			-- spawn the flowers
 			self.flowers={}
@@ -919,10 +903,7 @@ local entity_classes={
 				promise2=promise2:and_then("spawn_flower",flowers[i][1],flowers[i][2])
 			end
 			-- bloom the flowers
-			return promise
-				:and_then(40)
-				:and_then("bloom_flowers")
-				:and_then(30)
+			return promise:and_then_sequence(40,"bloom_flowers",30)
 		end,
 		cast_reflection=function(self,upgraded_version)
 			local promise=self:promise("summon_wands",upgraded_version)
@@ -972,37 +953,39 @@ local entity_classes={
 			if hand!="left" then
 				add(promises,{self.right_hand,"throw_cards",heart_row})
 			end
-			return self:promise(all_promises(unpack(promises)))
+			return self:promise_parallel(unpack(promises))
 		end,
 		throw_coins=function(self,num_coins,heart_index)
 			local promise=self:promise(self.right_hand,"move_to_temple",self)
 			local i
 			for i=1,num_coins do
-				promise=promise:and_then(self.right_hand,"set_pose",1)
-					:and_then("set_idle",false)
-					:and_then(self,"set_expression",7)
-					:and_then("set_idle",false)
-					:and_then(ternary(i==1,24,3))
-					:and_then("spawn_coin",i==heart_index)
-					:and_then(3)
-					:and_then("set_expression",3)
-					:and_then(self.right_hand,"set_pose",4)
-					:and_then(self,20)
+				promise=promise:and_then_sequence(
+					{self.right_hand,"set_pose",1},
+					{"set_idle",false},
+					{self,"set_expression",7},
+					{"set_idle",false},
+					ternary(i==1,24,3),
+					{"spawn_coin",i==heart_index},
+					3,
+					{self.right_hand,"set_pose",4},
+					{self,"set_expression",3},
+					20)
 			end
 			return promise
 		end,
 		shoot_lasers=function(self)
 			self.left_hand:disapper()
-			local promise=self:promise("set_held_state","right")
-				:and_then("set_expression",5)
-				:and_then("set_all_idle",false)
+			local promise=self:promise_sequence(
+				{"set_held_state","right"},
+				{"set_expression",5},
+				{"set_all_idle",false})
 			local i
 			local col=rnd_int(0,7)
 			for i=1,3 do
 				col=(col+rnd_int(2,6))%8
-				promise=promise
-					:and_then("move",10*col+5,-20,15,ease_in,{0,-10,0,-10})
-					:and_then("fire_laser")
+				promise=promise:and_then_sequence(
+					{"move",10*col+5,-20,15,ease_in,{0,-10,0,-10}},
+					"fire_laser")
 			end
 			return promise
 		end,
@@ -1012,21 +995,22 @@ local entity_classes={
 			for i=1,#self.flowers do
 				self.flowers[i]:bloom()
 			end
-			return self:promise("set_expression",3)
-				:and_then(self.left_hand,"set_pose",5)
-				:and_then(self.right_hand,"set_pose",5)
-				:and_then(self)
+			return self:promise_sequence(
+				{self.left_hand,"set_pose",5},
+				{self.right_hand,"set_pose",5},
+				{self,"set_expression",3})
 		end,
 		return_to_ready_position=function(self,expression,held_hand)
 			self.left_hand.holding_wand=false
 			self.right_hand.holding_wand=false
-			return self:promise("set_expression",expression or 1)
-				:and_then(self.left_hand,"set_pose",3)
-				:and_then(self.right_hand,"set_pose",3)
-				:and_then(self.left_hand,"set_idle",true)
-				:and_then(self.right_hand,"set_idle",true)
-				:and_then(self,"set_idle",true)
-				:and_then(self,"move_to_home",held_hand)
+			return self:promise_sequence(
+				{"set_idle",true},
+				{"set_expression",expression or 1},
+				{self.left_hand,"set_pose",3},
+				{"set_idle",true},
+				{self.right_hand,"set_pose",3},
+				{"set_idle",true},
+				{self,"move_to_home",held_hand})
 				:and_then(function()
 					if not self.left_hand.visible then
 						self.left_hand:appear()
@@ -1054,7 +1038,7 @@ local entity_classes={
 					if not self.right_hand.held_mirror and self.right_hand.x!=58 and self.right_hand!=-23 then
 						add(promises,{self.right_hand,"move",self.home_x+18,self.home_y+5,30,ease_in,{10,-10,20,0}})
 					end
-					return all_promises(unpack(promises))()
+					return self:promise_parallel(unpack(promises))
 				end)
 		end,
 		set_held_state=function(self,held_hand)
@@ -1078,17 +1062,18 @@ local entity_classes={
 				add(promises,{rh,"grab_mirror_handle",self})
 			end
 			if #promises>0 then
-				return self:promise(all_promises(unpack(promises)))
+				return self:promise_parallel(unpack(promises))
 			end
 		end,
 		fire_laser=function(self)
-			return self:promise("charge_laser",10)
-				:and_then(4)
-				:and_then("preview_laser",6)
-				:and_then("set_expression",0)
-				:and_then("spawn_laser",14)
-				:and_then("set_expression",5)
-				:and_then("preview_laser",4)
+			return self:promise(
+				{"charge_laser",10},
+				4,
+				{"preview_laser",6},
+				{"set_expression",0},
+				{"spawn_laser",14},
+				{"set_expression",5},
+				{"preview_laser",4})
 		end,
 		charge_laser=function(self,frames)
 			self.laser_charge_frames=frames
@@ -1435,28 +1420,15 @@ function init_game()
 		if beginning_phase>3 then
 			player_reflection=spawn_entity("player_reflection")
 		end
-		boss:promise("skip_to_fight")
-			:and_then("phase_change")
-			:and_then("return_to_ready_position")
-			:and_then("decide_next_action")
+		boss:promise_sequence(
+			"skip_to_fight",
+			"phase_change",
+			"return_to_ready_position",
+			"decide_next_action")
 	else
 		-- start the slow intro to the game
 		spawn_entity("instructions")
 	end
-	-- if self.phase==0 then
-	-- 	if self.health>=20 and not self.visible then
-	-- 		self.visible=true
-	-- 	end
-	-- 	if self.health>=40 then
-	-- 		boss.rainbow_frames=self.rainbow_frames
-	-- 	end
-	-- 	if self.health>=50 and not boss.visible then
-	-- 		boss.visible=true
-	-- 	end
-	-- 	if self.health>=60 then
-	-- 		-- boss:schedule(55,"intro")
-	-- 	end
-	-- end
 	-- immediately add new entities to the game
 	add_new_entities()
 end
@@ -1667,15 +1639,14 @@ function spawn_entity(class_name,x,y,args,skip_init)
 				self:die()
 			end,
 			-- promise methods
-			promise=function(self,ctx,...)
-				local p
-				if type(ctx)=="table" then
-					p=make_promise(ctx,...)
-				else
-					p=make_promise(self,ctx,...)
-				end
-				p:start()
-				return p
+			promise=function(self,...)
+				return make_promise(self):start():and_then(...)
+			end,
+			promise_sequence=function(self,...)
+				return make_promise(self):start():and_then_sequence(...)
+			end,
+			promise_parallel=function(self,...)
+				return make_promise(self):start():and_then_parallel(...)
 			end,
 			cancel_promises=function(self)
 				foreach(promises,function(promise)
@@ -1764,6 +1735,7 @@ function make_promise(ctx,fn,...)
 					self:finish()
 				end
 			end
+			return self
 		end,
 		finish=function(self)
 			if not self.finished and not self.canceled then
@@ -1797,37 +1769,50 @@ function make_promise(ctx,fn,...)
 				promise=make_promise(self.ctx,ctx,...)
 			end
 			promise.parent_promise=self
-			-- start the promise now, or shcedule it to start when this promise finishes
+			-- start the promise now, or schedule it to start when this promise finishes
 			if self.finished and not self.canceled then
 				promise:start()
 			else
 				add(self.and_thens,promise)
 			end
 			return promise
+		end,
+		and_then_sequence=function(self,args,...)
+			local promises,p={...}
+			if type(args)=="table" then
+				p=self:and_then(unpack(args))
+			else
+				p=self:and_then(args)
+			end
+			if #promises>0 then
+				return p:and_then_sequence(unpack(promises))
+			else
+				return p
+			end
+		end,
+		and_then_parallel=function(self,...)
+			local promise,promises,num_finished,i,p=make_promise(self.ctx),{...},0
+			if #promises==0 then
+				promise:finish()
+				return promise
+			else
+				for i=1,#promises do
+					if type(promises[i]=="table") then
+						p=self:and_then(unpack(promises[i]))
+					else
+						p=self:and_then(promises[i])
+					end
+					p:and_then(function()
+						num_finished+=1
+						if num_finished==#promises then
+							promise:finish()
+						end
+					end)
+				end
+				return promise
+			end
 		end
 	}
-end
-
-function all_promises(...)
-	local promises={...}
-	return function()
-		local promise,num_finished=make_promise(),0
-		local i
-		for i=1,#promises do
-			local promise2=make_promise(unpack(promises[i]))
-			promise2:start()
-			promise2:and_then(function()
-				num_finished+=1
-				if num_finished==#promises then
-					promise:finish()
-				end
-			end)
-		end
-		if #promises<=0 then
-			promise:finish()
-		end
-		return promise
-	end
 end
 
 -- magic tile functions
@@ -1844,18 +1829,20 @@ function on_magic_tile_picked_up(tile)
 		elseif tiles_collected==5 then
 			boss.visible=true
 		elseif tiles_collected==6 then
-			boss:promise("intro")
-				:and_then("phase_change")
-				:and_then("return_to_ready_position",nil,"right")
-				:and_then("decide_next_action")
+			boss:promise_sequence(
+				"intro",
+				"phase_change",
+				{"return_to_ready_position",nil,"right"},
+				"decide_next_action")
 		end
 	elseif boss_health.phase>0 then
 		if boss_health.health>=60 then
 			boss:cancel_everything()
-			boss:promise("reel")
-				:and_then("phase_change")
-				:and_then("return_to_ready_position",2)
-				:and_then(boss,"decide_next_action")
+			boss:promise_sequence(
+				"reel",
+				"phase_change",
+				{"return_to_ready_position",2},
+				{boss,"decide_next_action"})
 		end
 	end
 end
@@ -1983,11 +1970,6 @@ end
 -- generates a random number between min_val and max_val
 function rnd_num(min_val,max_val)
 	return min_val+rnd(max_val-min_val)
-end
-
-function rnd_item(...)
-	local args={...}
-	return args[rnd_int(1,#args)]
 end
 
 -- increment a counter, wrapping to 20000 if it risks overflowing
