@@ -28,7 +28,6 @@ function noop() end
 -- global constants
 local color_ramp_str="751000007d5100007e82100076b351007f94210076d510007776d51077776d1077e821007fa9421077fa9410776b3510776cd510776d510077fe8210777f9410"
 local color_ramps={}
-local rainbow_color
 
 -- global config vars
 local beginning_phase=3
@@ -94,20 +93,24 @@ local entity_classes={
 	},
 	movable={
 		apply_move=function(self)
-			if self.movement then
-				self.movement.frames+=1
-				local next_x,next_y=self.movement.fn(self.movement.easing(self.movement.frames/self.movement.duration))
-				self.vx,self.vy=next_x-self.x,next_y-self.y
-				if self.movement.frames>=self.movement.duration then
-					self.x,self.y=self.movement.final_x,self.movement.final_y
-					self.vx,self.vy=0,0
-					self.movement=nil
+			local move=self.movement
+			if move then
+				move.frames+=1
+				local t=move.easing(move.frames/move.duration)
+				local i
+				self.vx,self.vy=-self.x,-self.y
+				for i=0,3 do
+					local m=ternary(i%3>0,3,1)*t^i*(1-t)^(3-i)
+					self.vx+=m*move.bezier[2*i+1]
+					self.vy+=m*move.bezier[2*i+2]
+				end
+				if move.frames>=move.duration then
+					self.x,self.y,self.vx,self.vy,self.movement=move.final_x,move.final_y,0,0 -- ,nil
 				end
 			end
 		end,
 		move=function(self,x,y,dur,easing,anchors,is_relative)
-			local start_x,start_y=self.x,self.y
-			local end_x,end_y=x,y
+			local start_x,start_y,end_x,end_y=self.x,self.y,x,y
 			if is_relative then
 				end_x+=start_x
 				end_y+=start_y
@@ -120,11 +123,10 @@ local entity_classes={
 				final_x=end_x,
 				final_y=end_y,
 				easing=easing or linear,
-				fn=make_bezier(
-					start_x,start_y,
+				bezier={start_x,start_y,
 					start_x+anchors[1],start_y+anchors[2],
 					end_x+anchors[3],end_y+anchors[4],
-					end_x,end_y)
+					end_x,end_y}
 			}
 			return max(0,dur-1)
 		end,
@@ -633,8 +635,8 @@ local entity_classes={
 		init=function(self)
 			self.coins={}
 			self.flowers={}
-			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,self.y+5,{is_reflection=self.is_reflection})
-			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,self.y+5,{is_right_hand=true,dir=1,is_reflection=self.is_reflection})
+			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,self.y+5,{mirror=self,is_reflection=self.is_reflection})
+			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,self.y+5,{mirror=self,is_right_hand=true,dir=1,is_reflection=self.is_reflection})
 		end,
 		update=function(self)
 			if self.is_idle then
@@ -718,7 +720,7 @@ local entity_classes={
 				{"set_pose",5},6,
 				{"set_pose",4},10,
 				{self.right_hand,"appear"},15,
-				{"grab_mirror_handle",self},5,
+				"grab_mirror_handle",5,
 				{self,"set_expression",5},33,
 				{"set_expression",6},25,
 				{"set_expression",5},33,
@@ -838,7 +840,7 @@ local entity_classes={
 			self.left_hand:cancel_everything()
 			self.right_hand:cancel_everything()
 			self:cancel_promises()
-			self.vx,self.vy,self.movement=0,0 -- ,nil
+			self:cancel_move()
 			self.laser_charge_frames=0
 			self.laser_preview_frames=0
 			foreach(entities,function(entity)
@@ -863,7 +865,7 @@ local entity_classes={
 				)
 			local i
 			for i=1,8 do
-				promise=promise_sequence(
+				promise=promise:and_then_sequence(
 					function()
 						freeze_and_shake_screen(0,3)
 						self:poof(rnd_int(-15,15),rnd_int(-15,15))
@@ -886,7 +888,6 @@ local entity_classes={
 				end
 				i+=rnd_int(1,density)
 			end
-			shuffle_list(flowers)
 			-- concentrate
 			local promise=self:promise_sequence(
 				{self.left_hand,"set_idle",false},
@@ -900,6 +901,9 @@ local entity_classes={
 			self.flowers={}
 			local promise2=promise
 			for i=1,#flowers do
+				-- shuffle flowers
+				local j=rnd_int(i,#flowers)
+				flowers[i],flowers[j]=flowers[j],flowers[i]
 				promise2=promise2:and_then("spawn_flower",flowers[i][1],flowers[i][2])
 			end
 			-- bloom the flowers
@@ -1032,10 +1036,10 @@ local entity_classes={
 					if self.x!=self.home_x or self.y!=self.home_y then
 						add(promises,{self,"move",self.home_x,self.home_y,30,ease_in})
 					end
-					if not self.left_hand.held_mirror and self.left_hand.x!=22 and self.left_hand!=-23 then
+					if not self.left_hand.is_holding_mirror and self.left_hand.x!=22 and self.left_hand!=-23 then
 						add(promises,{self.left_hand,"move",self.home_x-18,self.home_y+5,30,ease_in,{-10,-10,-20,0}})
 					end
-					if not self.right_hand.held_mirror and self.right_hand.x!=58 and self.right_hand!=-23 then
+					if not self.right_hand.is_holding_mirror and self.right_hand.x!=58 and self.right_hand!=-23 then
 						add(promises,{self.right_hand,"move",self.home_x+18,self.home_y+5,30,ease_in,{10,-10,20,0}})
 					end
 					return self:promise_parallel(unpack(promises))
@@ -1045,28 +1049,28 @@ local entity_classes={
 			local promises={}
 			local lh,rh=self.left_hand,self.right_hand
 			if held_hand=="either" then
-				if rh.held_mirror then
+				if rh.is_holding_mirror then
 					held_hand="right"
 				else
 					held_hand="left"
 				end
 			end
-			if lh.held_mirror and held_hand!="left" then
+			if lh.is_holding_mirror and held_hand!="left" then
 				add(promises,{lh,"release_mirror"})
-			elseif not lh.held_mirror and held_hand=="left" then
-				add(promises,{lh,"grab_mirror_handle",self})
+			elseif not lh.is_holding_mirror and held_hand=="left" then
+				add(promises,{lh,"grab_mirror_handle"})
 			end
-			if rh.held_mirror and held_hand!="right" then
+			if rh.is_holding_mirror and held_hand!="right" then
 				add(promises,{rh,"release_mirror"})
-			elseif not rh.held_mirror and held_hand=="right" then
-				add(promises,{rh,"grab_mirror_handle",self})
+			elseif not rh.is_holding_mirror and held_hand=="right" then
+				add(promises,{rh,"grab_mirror_handle"})
 			end
 			if #promises>0 then
 				return self:promise_parallel(unpack(promises))
 			end
 		end,
 		fire_laser=function(self)
-			return self:promise(
+			return self:promise_sequence(
 				{"charge_laser",10},
 				4,
 				{"preview_laser",6},
@@ -1148,7 +1152,6 @@ local entity_classes={
 		render_layer=8,
 		pose=3,
 		dir=-1,
-		held_mirror=nil,
 		idle_mult=0,
 		idle_x=0,
 		idle_y=0,
@@ -1166,11 +1169,11 @@ local entity_classes={
 			self.idle_y=self.idle_mult*4*sin(f/30)
 			self:apply_move()
 			self:apply_velocity()
-			if self.held_mirror then
-				self.idle_x=self.held_mirror[1].idle_x
-				self.idle_y=self.held_mirror[1].idle_y
-				self.x=self.held_mirror[1].x+self.held_mirror[2]
-				self.y=self.held_mirror[1].y+self.held_mirror[3]
+			if self.is_holding_mirror then
+				self.idle_x=self.mirror.idle_x
+				self.idle_y=self.mirror.idle_y
+				self.x=self.mirror.x+2*self.dir
+				self.y=self.mirror.y+13
 			end
 		end,
 		draw=function(self)
@@ -1227,19 +1230,20 @@ local entity_classes={
 		spawn_card=function(self,has_heart)
 			spawn_entity("playing_card",self.x-10*self.dir,self.y,{vx=-self.dir,has_heart=has_heart})
 		end,
-		grab_mirror_handle=function(self,mirror)
-			return self:promise("set_pose",3)
-				:and_then("move",mirror.x+2*self.dir,mirror.y+13,10,ease_out,{10*self.dir,5,0,20})
-				:and_then("set_pose",2)
-				:and_then(function()
-					self.held_mirror={mirror,2*self.dir,13}
+		grab_mirror_handle=function(self)
+			return self:promise_sequence(
+				{"set_pose",3},
+				{"move",self.mirror.x+2*self.dir,self.mirror.y+13,10,ease_out,{10*self.dir,5,0,20}},
+				{"set_pose",2},
+				function()
+					self.is_holding_mirror=true
 				end)
 		end,
 		cancel_everything=function(self)
 			self:cancel_promises()
 			self.holding_wand=false
-			self.held_mirror=nil
-			self.vx,self.vy,self.movement=0,0 -- ,nil
+			self.is_holding_mirror=false
+			self:cancel_move()
 		end,
 		tap_mirror=function(self,mirror)
 			self:promise(9)
@@ -1258,9 +1262,10 @@ local entity_classes={
 			self.is_idle=idle
 		end,
 		release_mirror=function(self)
-			self.held_mirror=nil
-			return self:promise("set_pose",3)
-				:and_then("move",15*self.dir,-7,25,ease_in,nil,true)
+			self.is_holding_mirror=false
+			return self:promise_sequence(
+				{"set_pose",3},
+				{"move",15*self.dir,-7,25,ease_in,nil,true})
 		end,
 		appear=function(self)
 			self.visible=true
@@ -1280,22 +1285,14 @@ local entity_classes={
 				:and_then("set_pose",2)
 		end,
 		set_pose=function(self,pose)
-			if not self.held_mirror then
+			if not self.is_holding_mirror then
 				self.pose=pose
 			end
 		end,
 		poof=function(self,dx,dy)
 			spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
 			return 12
-		end,
-		--
-		-- move_to_home=function(self,x,y)
-		-- 	-- self:move(x-self.dir*18,y+5,30,{relative=false,easing=ease_in})
-		-- end,
-		-- move_to_mirror_handle=function(self,mirror,dx,dy)
-		-- 	-- lasts 10 frames
-		-- 	-- self:move(mirror.x+dx,mirror.y+dy,10,{easing=ease_out,anchors={-10*self.dir,5,0,20}})
-		-- end,
+		end
 	},
 	mirror_laser={
 		hitbox_channel=1, -- player
@@ -1358,6 +1355,7 @@ function _init()
 	}
 	-- run the "game" scene
 	scene,scene_frame=scenes.game,0
+	calc_rainbow_color()
 	scene[1]()
 end
 
@@ -1365,21 +1363,18 @@ local skip_frames=0
 function _update()
 	skip_frames=increment_counter(skip_frames)
 	if skip_frames%1>0 then return end
-	-- call the update function of the current scene
 	if freeze_frames>0 then
 		freeze_frames=decrement_counter(freeze_frames)
-		player:check_inputs()
+		player:check_inputs() -- todo other scenes won't like this
 	else
-		screen_shake_frames=decrement_counter(screen_shake_frames)
-		scene_frame=increment_counter(scene_frame)
+		screen_shake_frames,scene_frame=decrement_counter(screen_shake_frames),increment_counter(scene_frame)
+		calc_rainbow_color()
 		-- update promises
 		local num_promises,i=#promises
 		for i=1,num_promises do
 			promises[i]:update()
 		end
-		filter_list(promises,function(promise)
-			return not promise.finished
-		end)
+		filter_out_finished(promises)
 		-- update the scene
 		scene[2]()
 	end
@@ -1392,15 +1387,15 @@ function _draw()
 	scene[3]()
 	-- draw debug info
 	-- camera()
-	-- print("mem:      "..flr(100*(stat(0)/1024)).."%",2,109,ternary(stat(1)>=1024,8,2))
-	-- print("cpu:      "..flr(100*stat(1)).."%",2,116,ternary(stat(1)>=1,8,2))
-	-- print("entities: "..#entities,2,123,ternary(#entities>50,8,2))
+	-- print("mem:      "..flr(100*(stat(0)/1024)).."%",2,102,ternary(stat(1)>=1024,8,3))
+	-- print("cpu:      "..flr(100*stat(1)).."%",2,109,ternary(stat(1)>=1,8,3))
+	-- print("entities: "..#entities,2,116,ternary(#entities>50,8,3))
+	-- print("promises: "..#promises,2,123,ternary(#promises>30,8,3))
 end
 
 
 -- game functions
 function init_game()
-	calc_rainbow_color()
 	-- reset everything
 	entities,new_entities={},{}
 	-- create starting entities
@@ -1434,7 +1429,6 @@ function init_game()
 end
 
 function update_game()
-	calc_rainbow_color()
 	-- sort entities for updating
 	sort_list(entities,updates_before)
 	-- update entities
@@ -1444,7 +1438,7 @@ function update_game()
 		entity:update()
 		-- do some default update stuff
 		decrement_counter_prop(entity,"invincibility_frames")
-		increment_counter_prop(entity,"frames_alive")
+		entity.frames_alive=increment_counter(entity.frames_alive)
 		if decrement_counter_prop(entity,"frames_to_death") then
 			entity:die()
 		end
@@ -1466,9 +1460,7 @@ function update_game()
 	-- add new entities to the game
 	add_new_entities()
 	-- remove dead entities from the game
-	filter_list(entities,function(entity)
-		return entity.is_alive
-	end)
+	filter_out_finished(entities)
 	-- sort entities for rendering
 	sort_list(entities,renders_on_top_of)
 end
@@ -1590,7 +1582,7 @@ function spawn_entity(class_name,x,y,args,skip_init)
 		-- create default entity
 		entity={
 			-- lifetime props
-			is_alive=true,
+			-- finished=false,
 			frames_alive=0,
 			frames_to_death=0,
 			-- ordering props
@@ -1606,7 +1598,6 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			vx=0,
 			vy=0,
 			-- entity methods
-			add_to_game=noop,
 			init=noop,
 			update=function(self)
 				self:apply_velocity()
@@ -1618,10 +1609,10 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			draw=noop,
 			die=function(self)
 				self:on_death()
-				self.is_alive=false
+				self.finished=true
 			end,
 			despawn=function(self)
-				self.is_alive=false
+				self.finished=true
 			end,
 			on_death=noop,
 			col=function(self)
@@ -1664,14 +1655,14 @@ function spawn_entity(class_name,x,y,args,skip_init)
 		end
 		entity[k]=v
 	end
+	entity.class_name=class_name
 	-- add properties onto it from the arguments
 	for k,v in pairs(args or {}) do
 		entity[k]=v
 	end
-	entity.class_name=class_name
 	if not skip_init then
 		-- initialize it
-		entity:init(args)
+		entity:init()
 		-- add it to the list of entities-to-be-added
 		add(new_entities,entity)
 	end
@@ -1681,7 +1672,6 @@ end
 
 function add_new_entities()
 	foreach(new_entities,function(entity)
-		entity:add_to_game()
 		add(entities,entity)
 	end)
 	new_entities={}
@@ -1698,18 +1688,13 @@ function renders_on_top_of(a,b)
 	return a.render_layer>b.render_layer
 end
 
-
--- tile functions
-function tile_exists(col,row)
-	return mid(1,col,8)==col and mid(1,row,5)==row
-end
-
 -- promise functions
 function make_promise(ctx,fn,...)
 	local args={...}
 	return {
 		ctx=ctx,
 		and_thens={},
+		frames_to_finish=0,
 		start=function(self)
 			if not self.started and not self.canceled then
 				self.started=true
@@ -1722,9 +1707,6 @@ function make_promise(ctx,fn,...)
 				end
 				-- the result of the fn call was a promise, when it's done, finish this promise
 				if type(f)=="table" then
-					if not f.ctx then
-						f.ctx=self.ctx
-					end
 					f:and_then(self,"finish")
 				-- wait a certain number of frames
 				elseif f and f>0 then
@@ -1736,6 +1718,11 @@ function make_promise(ctx,fn,...)
 				end
 			end
 			return self
+		end,
+		update=function(self)
+			if decrement_counter_prop(self,"frames_to_finish") then
+				self:finish()
+			end
 		end,
 		finish=function(self)
 			if not self.finished and not self.canceled then
@@ -1756,11 +1743,6 @@ function make_promise(ctx,fn,...)
 				end)
 			end
 		end,
-		update=function(self)
-			if self.frames_to_finish and decrement_counter_prop(self,"frames_to_finish") then
-				self:finish()
-			end
-		end,
 		and_then=function(self,ctx,...)
 			local promise
 			if type(ctx)=="table" then
@@ -1770,7 +1752,9 @@ function make_promise(ctx,fn,...)
 			end
 			promise.parent_promise=self
 			-- start the promise now, or schedule it to start when this promise finishes
-			if self.finished and not self.canceled then
+			if self.canceled then
+				promise:cancel()
+			elseif self.finished then
 				promise:start()
 			else
 				add(self.and_thens,promise)
@@ -1778,39 +1762,40 @@ function make_promise(ctx,fn,...)
 			return promise
 		end,
 		and_then_sequence=function(self,args,...)
-			local promises,p={...}
+			local promises={...}
+			local promise
 			if type(args)=="table" then
-				p=self:and_then(unpack(args))
+				promise=self:and_then(unpack(args))
 			else
-				p=self:and_then(args)
+				promise=self:and_then(args)
 			end
 			if #promises>0 then
-				return p:and_then_sequence(unpack(promises))
-			else
-				return p
+				return promise:and_then_sequence(unpack(promises))
 			end
+			return promise
 		end,
 		and_then_parallel=function(self,...)
-			local promise,promises,num_finished,i,p=make_promise(self.ctx),{...},0
+			local overall_promise,promises,num_finished=make_promise(self.ctx),{...},0
 			if #promises==0 then
-				promise:finish()
-				return promise
+				overall_promise:finish()
 			else
-				for i=1,#promises do
-					if type(promises[i]=="table") then
-						p=self:and_then(unpack(promises[i]))
+				local parallel_promise
+				foreach(promises,function(parallel_promise)
+					local temp_promise
+					if type(parallel_promise)=="table" then
+						temp_promise=self:and_then(unpack(parallel_promise))
 					else
-						p=self:and_then(promises[i])
+						temp_promise=self:and_then(parallel_promise)
 					end
-					p:and_then(function()
+					temp_promise:and_then(function()
 						num_finished+=1
 						if num_finished==#promises then
-							promise:finish()
+							overall_promise:finish()
 						end
 					end)
-				end
-				return promise
+				end)
 			end
+			return overall_promise
 		end
 	}
 end
@@ -1869,11 +1854,8 @@ end
 
 -- drawing functions
 function calc_rainbow_color()
-	rainbow_color=8+flr(scene_frame/4)%6
-	if rainbow_color==13 then
-		rainbow_color=14
-	end
-	color_ramps[16]=color_ramps[rainbow_color]
+	local rainbow_color=8+flr(scene_frame/4)%6
+	color_ramps[16]=color_ramps[ternary(rainbow_color==13,14,rainbow_color)]
 end
 
 function get_color(c,fade) -- fade between 3 (lightest) and -3 (darkest)
@@ -1888,15 +1870,13 @@ end
 
 function sspr2(x,y,width,height,x2,y2,flip_horizontal,flip_vertical)
 	sspr(x,y,width,height,x2+0.5,y2+0.5,width,height,flip_horizontal,flip_vertical)
-	-- rect(x2,y2,x2+width-1,y2+height-1,8)
 end
 
 -- tile functions
 function is_tile_occupied(col,row)
-	local i
-	for i=1,#entities do
-		local entity=entities[i]
-		if entity.occupies_tile and entity:col()==col and entity:row()==row then
+	local e
+	for e in all(entities) do
+		if e.occupies_tile and e:col()==col and e:row()==row then
 			return true
 		end
 	end
@@ -1924,24 +1904,9 @@ function ease_out_in(percent)
 end
 
 -- helper functions
-function freeze_and_shake_screen(freeze,shake)
-	freeze_frames=max(freeze,freeze_frames)
-	screen_shake_frames=max(shake,screen_shake_frames)
-end
-
--- creates a bezier function from 4 sets of coordinates
-function make_bezier(...) -- x1,y1,x2,...,y4
-	local args={...}
-	return function(t)
-		local x,y=0,0
-		local i
-		for i=0,3 do
-			local m=ternary(i%3>0,3,1)*t^i*(1-t)^(3-i)
-			x+=m*args[2*i+1]
-			y+=m*args[2*i+2]
-		end
-		return x,y
-	end
+function freeze_and_shake_screen(f,s)
+	freeze_frames=max(f,freeze_frames)
+	screen_shake_frames=max(s,screen_shake_frames)
 end
 
 -- round a number up to the nearest integer
@@ -1980,11 +1945,6 @@ function increment_counter(n)
 	return n+1
 end
 
--- increment_counter on a property on an object
-function increment_counter_prop(obj,k)
-	obj[k]=increment_counter(obj[k])
-end
-
 -- decrement a counter but not below 0
 function decrement_counter(n)
 	return max(0,n-1)
@@ -1996,7 +1956,6 @@ function decrement_counter_prop(obj,k)
 		obj[k]=decrement_counter(obj[k])
 		return obj[k]<=0
 	end
-	return false
 end
 
 -- sorts list (inefficiently) based on func
@@ -2011,24 +1970,15 @@ function sort_list(list,func)
 	end
 end
 
--- shuffles a list randomly
-function shuffle_list(list)
-	local i
-	for i=1,#list do
-		local j=rnd_int(i,#list)
-		list[i],list[j]=list[j],list[i]
-	end
-end
-
--- filters list to contain only entries where func is truthy
-function filter_list(list,func)
-	local num_deleted,i=0
-	for i=1,#list do
-		if not func(list[i]) then
-			list[i]=nil
+-- filter out anything in list with finished=true
+function filter_out_finished(list)
+	local num_deleted,k,v=0
+	for k,v in pairs(list) do
+		if v.finished then
+			list[k]=nil
 			num_deleted+=1
 		else
-			list[i-num_deleted],list[i]=list[i],nil
+			list[k-num_deleted],list[k]=v,nil
 		end
 	end
 end
