@@ -38,7 +38,7 @@ todo:
 function noop() end
 
 -- global config vars
-local beginning_phase=2
+local beginning_phase=1
 local one_hit_ko=false
 
 -- global scene vars
@@ -65,8 +65,6 @@ local boss_reflection
 -- global entities classes
 local entity_classes={
 	instructions={
-		x=40,
-		y=-29,
 		button_presses={},
 		num_buttons_pressed=0,
 		update=function(self)
@@ -74,31 +72,24 @@ local entity_classes={
 			for i=0,3 do
 				if btn(i) and not self.button_presses[i] then
 					self.num_buttons_pressed+=1
-					local frames=150-30*self.num_buttons_pressed
-					if self.frames_to_death<=0 then
-						self.frames_to_death=frames
-					else 
-						self.frames_to_death=min(self.frames_to_death,frames)
-					end
-					self.button_presses[i]=true
+					self.button_presses[i],self.frames_to_death=true,min(ternary(self.frames_to_death==0,999,self.frames_to_death),150-30*self.num_buttons_pressed)
 				end
 			end
 		end,
 		draw=function(self)
 			local x,y=self.x,self.y
-			print("press",x-9,y-18,self:calc_color(4))
-			print("to move",x-13,y+16)
-			print("”",x-3,y-9,self:calc_color(2)) -- up
-			print("‹",x-13,y-1,self:calc_color(0)) -- left
-			print("‘",x+7,y-1,self:calc_color(1)) -- right
-			print("ƒ",x-3,y+7,self:calc_color(3)) -- down
+			print("press",x-6,y-17,self:calc_color())
+			print("to move",x-10,y+17)
+			print("”",x,y-8,self:calc_color(2)) -- up
+			print("‹",x-10,y,self:calc_color(0)) -- left
+			print("‘",x+10,y,self:calc_color(1)) -- right
+			print("ƒ",x,y+8,self:calc_color(3)) -- down
 		end,
 		calc_color=function(self,dir)
 			if self.frames_to_death==mid(1,self.frames_to_death,20) then
 				return 1
-			else
-				return ternary(self.button_presses[dir],6,13)
 			end
+			return ternary(self.button_presses[dir],6,13)
 		end,
 		on_death=function(self)
 			spawn_magic_tile(50)
@@ -189,53 +180,52 @@ local entity_classes={
 			end
 		end,
 		draw=function(self)
-			local spritesheet_x,spritesheet_y,spritesheet_height,dx,dy,facing=0,0,8,7,6,self.facing
-			local flipped=(facing=="left")
-			-- up/down sprites are below the left/right sprites in the spritesheet
-			if facing=="up" then
-				spritesheet_y,spritesheet_height,dx=8,11,5
-			elseif facing=="down" then
-				spritesheet_y,spritesheet_height,dx,dy=19,11,5,9
-			elseif facing=="left" then
-				dx=3
-			end
-			-- moving between tiles
-			if self.step_frames>0 then
-				spritesheet_x=44-11*self.step_frames
-			end
-			-- teetering off the edge or bumping into a wall
-			if self.teeter_frames>0 or self.bump_frames>0 then
-				spritesheet_x=66
-				if self.bump_frames<=0 then
-					local c=ternary(self.teeter_frames%4<2,8,9)
-					palt2(c)
-					pal(17-c,self.secondary_color)
-					spritesheet_x=44
-				end
-				if facing=="up" then
-					dy+=3
-				elseif facing=="down" then
-					dy-=2
-				elseif facing=="left" then
-					dx+=4
-				elseif facing=="right" then
-					dx-=4
-				end
-				if self.teeter_frames<3 and self.bump_frames<3 then
-					spritesheet_x=55
-				end
-			end
-			-- getting hurt
-			if self.stun_frames>0 then
-				spritesheet_x,spritesheet_y,spritesheet_height,dx,dy,flipped=77,0,10,5,8,self.stun_frames%6>3
-			end
-			-- draw the sprite
-			palt2(3)
-			pal(12,self.primary_color)
-			pal(13,self.secondary_color)
-			pal(1,self.eye_color)
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
-				sspr2(spritesheet_x,spritesheet_y,11,spritesheet_height,self.x-dx,self.y-dy,flipped)
+				local sx,sy,sh,dx,dy,facing,flipped=0,0,8,7,6,self.facing,self.facing=="left"
+				-- up/down sprites are below the left/right sprites in the spritesheet
+				if facing=="up" then
+					sy,sh,dx=8,11,5
+				elseif facing=="down" then
+					sy,sh,dx,dy=19,11,5,9
+				elseif facing=="left" then
+					dx=3
+				end
+				-- moving between tiles
+				if self.step_frames>0 then
+					sx=44-11*self.step_frames
+				end
+				-- teetering off the edge or bumping into a wall
+				if self.teeter_frames>0 or self.bump_frames>0 then
+					sx=66
+					if self.bump_frames<=0 then
+						local c=ternary(self.teeter_frames%4<2,8,9)
+						palt2(c)
+						pal(17-c,self.secondary_color)
+						sx=44
+					end
+					if facing=="up" then
+						dy+=3
+					elseif facing=="down" then
+						dy-=2
+					elseif facing=="left" then
+						dx+=4
+					elseif facing=="right" then
+						dx-=4
+					end
+					if self.teeter_frames<3 and self.bump_frames<3 then
+						sx=55
+					end
+				end
+				-- getting hurt
+				if self.stun_frames>0 then
+					sx,sy,sh,dx,dy,flipped=77,0,10,5,8,self.stun_frames%6>3
+				end
+				-- draw the sprite
+				palt2(3)
+				pal(12,self.primary_color)
+				pal(13,self.secondary_color)
+				pal(1,self.eye_color)
+				sspr2(sx,sy,11,sh,self.x-dx,self.y-dy,flipped)
 			end
 		end,
 		check_inputs=function(self)
@@ -1402,7 +1392,7 @@ function init_game()
 	player_health,player,player_reflection=spawn_entity("player_health"),spawn_entity("player",35,20) -- ,nil
 	boss_health,boss,boss_reflection=spawn_entity("boss_health") -- ,nil,nil
 	if beginning_phase==0 then
-		spawn_entity("instructions")
+		spawn_entity("instructions",37,-30)
 	else
 		-- skip to certain phase of the fight (for debug purposes)
 		boss=spawn_entity("magic_mirror")
