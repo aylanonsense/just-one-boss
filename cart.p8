@@ -37,34 +37,32 @@ todo:
 -- useful noop function
 function noop() end
 
--- global constants
-local color_ramp_str="751000007d5100007e82100076b351007f94210076d510007776d51077776d1077e821007fa9421077fa9410776b3510776cd510776d510077fe8210777f9410"
-local color_ramps={}
-
 -- global config vars
-local beginning_phase=1
-local one_hit_ko=true
-local tiles_collected
+local beginning_phase=2
+local one_hit_ko=false
 
 -- global scene vars
 local scenes
 local scene
 local scene_frame
-local freeze_frames=0
-local screen_shake_frames=0
+local freeze_frames
+local screen_shake_frames
+local rainbow_color
 
 -- global promise vars
 local promises={}
 
 -- global entity vars
+local entities
+local new_entities
 local player
 local player_health
 local player_reflection
 local boss
-local boss_reflection
 local boss_health
-local entities
-local new_entities
+local boss_reflection
+
+-- global entities classes
 local entity_classes={
 	instructions={
 		x=40,
@@ -76,29 +74,31 @@ local entity_classes={
 			for i=0,3 do
 				if btn(i) and not self.button_presses[i] then
 					self.num_buttons_pressed+=1
+					local frames=150-30*self.num_buttons_pressed
 					if self.frames_to_death<=0 then
-						self.frames_to_death=180-30*self.num_buttons_pressed
+						self.frames_to_death=frames
 					else 
-						self.frames_to_death=min(self.frames_to_death,180-30*self.num_buttons_pressed)
+						self.frames_to_death=min(self.frames_to_death,frames)
 					end
 					self.button_presses[i]=true
 				end
 			end
 		end,
 		draw=function(self)
-			local x,y,fade=self.x,self.y,0
-			if self.frames_to_death>0 then
-				fade=min(0,flr(self.frames_to_death/15)-3)
-			end
-			print("press",x-9,y-18,get_color(6,fade))
+			local x,y=self.x,self.y
+			print("press",x-9,y-18,self:calc_color(4))
 			print("to move",x-13,y+16)
-			print("”",x-3,y-9,self:choose_color(2,fade)) -- up
-			print("‹",x-13,y-1,self:choose_color(0,fade)) -- left
-			print("‘",x+7,y-1,self:choose_color(1,fade)) -- right
-			print("ƒ",x-3,y+7,self:choose_color(3,fade)) -- down
+			print("”",x-3,y-9,self:calc_color(2)) -- up
+			print("‹",x-13,y-1,self:calc_color(0)) -- left
+			print("‘",x+7,y-1,self:calc_color(1)) -- right
+			print("ƒ",x-3,y+7,self:calc_color(3)) -- down
 		end,
-		choose_color=function(self,dir,fade)
-			return get_color(ternary(self.button_presses[dir],6,13),fade)
+		calc_color=function(self,dir)
+			if self.frames_to_death==mid(1,self.frames_to_death,20) then
+				return 1
+			else
+				return ternary(self.button_presses[dir],6,13)
+			end
 		end,
 		on_death=function(self)
 			spawn_magic_tile(50)
@@ -208,8 +208,8 @@ local entity_classes={
 				spritesheet_x=66
 				if self.bump_frames<=0 then
 					local c=ternary(self.teeter_frames%4<2,8,9)
-					pal2(c)
-					pal2(17-c,self.secondary_color)
+					palt2(c)
+					pal(17-c,self.secondary_color)
 					spritesheet_x=44
 				end
 				if facing=="up" then
@@ -230,9 +230,9 @@ local entity_classes={
 				spritesheet_x,spritesheet_y,spritesheet_height,dx,dy,flipped=77,0,10,5,8,self.stun_frames%6>3
 			end
 			-- draw the sprite
-			pal2(3)
-			pal2(12,self.primary_color)
-			pal2(13,self.secondary_color)
+			palt2(3)
+			pal(12,self.primary_color)
+			pal(13,self.secondary_color)
 			pal(1,self.eye_color)
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
 				sspr2(spritesheet_x,spritesheet_y,11,spritesheet_height,self.x-dx,self.y-dy,flipped)
@@ -311,7 +311,7 @@ local entity_classes={
 		end,
 		draw=function(self)
 			if self.visible then
-				pal2(3)
+				palt2(3)
 				local i
 				for i=1,4 do
 					local sprite
@@ -370,7 +370,7 @@ local entity_classes={
 		draw=function(self)
 			if self.visible then
 				local x,y=self.x,self.y
-				rect(x-30,y-3,x+30,y+3,get_color(ternary(self.rainbow_frames>0,16,5)))
+				rect(x-30,y-3,x+30,y+3,ternary(self.rainbow_frames>0,rainbow_color,5))
 				rectfill(x-30,y-3,x+mid(-30,-31+self.visible_health,29),y+3)
 			end
 		end,
@@ -406,14 +406,17 @@ local entity_classes={
 			end
 		end,
 		draw=function(self)
-			local x,y,tile_color,bg_color,fade=self.x,self.y,16,1,max(0,3-flr(self.frames_alive/2))
-			if self.frames_to_death>0 then
-				tile_color,bg_color,fade=6,6,flr(self.frames_to_death/4)
+			local x,y,tile_color,bg_color=self.x,self.y,rainbow_color,1
+			if self.frames_to_death>0 or self.frames_alive<4 then
+				tile_color,bg_color=7,7
+				if self.frames_to_death==mid(1,self.frames_to_death,2) then
+					tile_color,bg_color=6,6
+				end
 			end
 			-- draw background
-			rectfill(x-4,y-3,x+4,y+3,get_color(bg_color,fade))
+			rectfill(x-4,y-3,x+4,y+3,bg_color)
 			-- draw tile
-			rect(x-4,y-3,x+4,y+3,get_color(tile_color,fade))
+			rect(x-4,y-3,x+4,y+3,tile_color)
 			rect(x-2,y-1,x+2,y+1)
 		end,
 		on_hurt=function(self)
@@ -465,11 +468,11 @@ local entity_classes={
 			self:apply_velocity()
 		end,
 		draw=function(self)
-			pal2(3)
+			palt2(3)
 			-- some cards are red
 			if self.has_heart then
-				pal2(5,8)
-				pal2(6,15)
+				pal(5,8)
+				pal(6,15)
 			end
 			-- spin counter-clockwise when moving left
 			local f=flr(self.frames_alive/5)%4
@@ -492,9 +495,9 @@ local entity_classes={
 			self.hitbox_channel=ternary(self.frames_to_death>self.hittable_frames,1,0) -- player
 		end,
 		draw=function(self)
-			pal2(4)
-			pal2(8,self.color)
-			pal2(15,self.accent_color)
+			palt2(4)
+			pal(8,self.color)
+			pal(15,self.accent_color)
 			sspr2(9*ceil(self.frames_to_death/34)+88,85,9,8,self.x-4,self.y-4,self.flipped)
 		end,
 		bloom=function(self)
@@ -526,7 +529,7 @@ local entity_classes={
 			self:apply_velocity()
 		end,
 		draw=function(self)
-			pal2(3)
+			palt2(3)
 			if self.frames_alive<36 then
 				circfill(self.target_x,self.target_y,min(flr(self.frames_alive/7),4),2)
 			end
@@ -567,17 +570,7 @@ local entity_classes={
 			self:apply_velocity()
 		end,
 		draw=function(self)
-			local fade=0
-			if self.fade_in_rate then
-				fade=max(fade,3-flr(self.frames_alive/self.fade_in_rate))
-			end
-			if self.fade_out_rate then
-				fade=min(fade,flr(self.frames_to_death/self.fade_out_rate)-3)
-			end
-			if self.reverse_fade then
-				fade*=-1
-			end
-			line(self.x,self.y,self.prev_x,self.prev_y,get_color(self.color,fade))
+			line(self.x,self.y,self.prev_x,self.prev_y,ternary(self.color==16,rainbow_color,self.color))
 		end
 	},
 	magic_mirror={
@@ -617,9 +610,6 @@ local entity_classes={
 				local x,y,angle=self.x,self.y,rnd()
 				spawn_entity("particle",x+22*cos(angle),y+22*sin(angle),{
 					color=14,
-					fade_in_rate=3,
-					fade_out_rate=2,
-					reverse_fade=true,
 					frames_to_death=18
 				}):move(x,y,20,ease_out)
 			end
@@ -629,12 +619,12 @@ local entity_classes={
 			if self.is_reflection then
 				local i
 				for i=1,15 do
-					pal2(i,3)
+					pal(i,3)
 				end
-				pal2(7,11)
-				pal2(6,11)
+				pal(7,11)
+				pal(6,11)
 			end
-			pal2(3)
+			palt2(3)
 			if self.visible then
 				-- draw mirror
 				sspr2(115,84,13,30,x-6,y-12)
@@ -647,17 +637,14 @@ local entity_classes={
 				if not self.is_reflection then
 					local i
 					for i=1,15 do
-						pal2(i,16)
+						pal(i,rainbow_color)
 					end
-					if self.expression>0 and self.expression!=5 and self.expression!=4 then
-						pal2(13,16,-1)
-					end
-					pal2(3)
+					palt2(3)
 				end
 				sspr2(117,114,11,14,x-5,y-7,false,self.expression==5 and (self.frames_alive)%4<2)
 				if not self.is_reflection then
 					pal()
-					pal2(3)
+					palt2(3)
 				end
 			end
 			if self.visible then
@@ -882,7 +869,7 @@ local entity_classes={
 					self.left_hand:move(-18,6,20,ease_in,nil,true)
 				end)
 			return promise:and_then_sequence(
-				{self.right_hand,"move",0,10,20,ease_in_out,{-25,-20,-25,0},true},
+				{self.right_hand,"move",0,10,20,ease_out_in,{-25,-20,-25,0},true},
 				15)
 		end,
 		conjure_flowers=function(self,density)
@@ -1188,25 +1175,24 @@ local entity_classes={
 			local x,y=self.x+self.idle_x,self.y+self.idle_y
 			if self.visible then
 				if self.is_holding_bouquet then
-					pal2(4)
+					palt2(4)
 					sspr2(97,85,9,16,self.x-1,self.y-12)
 					pal()
 				end
 				if self.is_reflection then
 					local i
 					for i=1,15 do
-						pal2(i,3)
+						pal(i,3)
 					end
-					pal2(7,11)
-					pal2(6,11)
+					pal(7,11)
+					pal(6,11)
 				elseif boss_health.rainbow_frames>0 then
 					local i
 					for i=1,15 do
-						pal2(i,16)
+						pal(i,rainbow_color)
 					end
-					pal2(13,16,-1)
 				end
-				pal2(3)
+				palt2(3)
 				sspr2(12*self.pose-12,51,12,11,x-ternary(self.is_right_hand,7,4),y-8,self.is_right_hand)
 				if self.holding_wand then
 					if self.pose==1 then
@@ -1304,7 +1290,7 @@ local entity_classes={
 		end,
 		move_to_row=function(self,row)
 			return self:promise("set_pose",3)
-				:and_then("move",40+50*self.dir,8*row-4,18,ease_in_out,{10*self.dir,-10,10*self.dir,10})
+				:and_then("move",40+50*self.dir,8*row-4,18,ease_out_in,{10*self.dir,-10,10*self.dir,10})
 				:and_then("set_pose",2)
 		end,
 		set_pose=function(self,pose)
@@ -1335,11 +1321,11 @@ local entity_classes={
 		frames_to_death=150,
 		hurtbox_channel=2, -- pickup
 		draw=function(self)
-			pal2(3)
+			palt2(3)
 			local f=self.frames_to_death
 			if f>30 or f%4>1 then
 				if (f+4)%30>14 then
-					pal2(14,8)
+					pal(14,8)
 				end
 				sspr2(ternary(f%30<20,36,45),30,9,7,self.x-4,self.y-5-max(0,self.frames_alive-0.09*self.frames_alive*self.frames_alive))
 			end
@@ -1355,37 +1341,28 @@ local entity_classes={
 		frames_to_death=12,
 		render_layer=9,
 		draw=function(self)
-			pal2(3)
+			palt2(3)
 			sspr2(16*flr(self.frames_alive/3),37,16,14,self.x-8,self.y-8)
 		end
 	}
 }
 
-
 -- primary pico-8 functions (_init, _update, _draw)
 function _init()
-	-- unpack the color ramps from hex to actual ints
-	local i,j
-	for i=0,15 do
-		color_ramps[i]={}
-		for j=1,8 do
-			add(color_ramps[i],("0x"..(sub(color_ramp_str,8*i+j,8*i+j)))+0)
-		end
-	end
-	-- set up the scenes now that the functions are defined
+	-- set up the scenes
 	scenes={
 		game={init_game,update_game,draw_game}
 	}
 	-- run the "game" scene
-	scene,scene_frame=scenes.game,0
+	scene,scene_frame,freeze_frames,screen_shake_frames=scenes.game,0,0,0
 	calc_rainbow_color()
 	scene[1]()
 end
 
-local skip_frames=0
+-- local skip_frames=0
 function _update()
-	skip_frames=increment_counter(skip_frames)
-	if skip_frames%1>0 then return end
+	-- skip_frames=increment_counter(skip_frames)
+	-- if skip_frames%1>0 then return end
 	if freeze_frames>0 then
 		freeze_frames=decrement_counter(freeze_frames)
 		player:check_inputs() -- todo other scenes won't like this
@@ -1422,17 +1399,14 @@ function init_game()
 	-- reset everything
 	entities,new_entities={},{}
 	-- create starting entities
-	tiles_collected=0
-	player=spawn_entity("player",35,20)
-	player_health=spawn_entity("player_health")
-	player_reflection=nil
-	boss=nil
-	boss_reflection=nil
-	boss_health=spawn_entity("boss_health")
-	if beginning_phase>0 then
+	player_health,player,player_reflection=spawn_entity("player_health"),spawn_entity("player",35,20) -- ,nil
+	boss_health,boss,boss_reflection=spawn_entity("boss_health") -- ,nil,nil
+	if beginning_phase==0 then
+		spawn_entity("instructions")
+	else
+		-- skip to certain phase of the fight (for debug purposes)
 		boss=spawn_entity("magic_mirror")
 		boss.visible=true
-		-- player_health.visible=true
 		boss_health.visible=true
 		boss_health.phase=beginning_phase-1
 		if beginning_phase>3 then
@@ -1443,9 +1417,6 @@ function init_game()
 			"phase_change",
 			"return_to_ready_position",
 			"decide_next_action")
-	else
-		-- start the slow intro to the game
-		spawn_entity("instructions")
 	end
 	-- immediately add new entities to the game
 	add_new_entities()
@@ -1453,7 +1424,9 @@ end
 
 function update_game()
 	-- sort entities for updating
-	sort_list(entities,updates_before)
+	sort_list(entities,function(a,b)
+		return a.update_priority>b.update_priority
+	end)
 	-- update entities
 	local entity
 	for entity in all(entities) do
@@ -1485,7 +1458,9 @@ function update_game()
 	-- remove dead entities from the game
 	filter_out_finished(entities)
 	-- sort entities for rendering
-	sort_list(entities,renders_on_top_of)
+	sort_list(entities,function(a,b)
+		return ternary(a.render_layer==b.render_layer,a:row()>b:row(),a.render_layer>b.render_layer)
+	end)
 end
 
 function draw_game()
@@ -1496,10 +1471,40 @@ function draw_game()
 	end
 	-- draw the background
 	camera(shake_x,-11)
-	draw_background()
+	-- draw "curtains"
+	local curtains,i={1,83,7,57,18,25,22,9}
+	for i=1,#curtains,2 do
+		local x,y=curtains[i],curtains[i+1]
+		line(x,0,x,y,2)
+		line(126-x,0,126-x,y)
+	end
+	-- draw stars
+	local stars={29,19,88,7,18,41,44,3,102,43,24,45,112,62,11,70,5,108,120,91,110,119}
+	circ(18,41,1,1)
+	circ(112,62,1)
+	for i=1,#stars,2 do
+		pset(stars[i],stars[i+1])
+	end
 	-- draw tiles
 	camera(shake_x-23,-65)
-	draw_tiles()
+	palt2(3)
+	local c,r
+	for c=0,7 do
+		for r=0,4 do
+			sspr2(93+(c+r)%2*11,76,11,9,10*c,8*r)
+		end
+	end
+	-- draw some other grid stuff
+	color(1)
+	line(16,-1,64,-1)
+	line(16,41,64,41)
+	line(16,49,64,49)
+	sspr2(68,90,20,5,30,46)
+	for i=0,1 do
+		sspr2(59,102,16,2,65*i,-1,i==1,true)
+		sspr2(59,102,16,12,65*i,40,i==1)
+	end
+	pal()
 	-- draw entities
 	foreach(entities,function(entity)
 		if not entity.is_user_interface then
@@ -1509,7 +1514,28 @@ function draw_game()
 	end)
 	-- draw ui
 	camera(shake_x)
-	draw_ui()
+	-- palt2(3)
+	-- -- draw black boxes
+	-- rectfill(0,0,127,10,0)
+	-- rectfill(0,118,127,128)
+	-- -- draw score multiplier
+	-- sspr2(117,0,11,7,6,2)
+	-- print("4",8,3,0)
+	-- -- draw score
+	-- print("25700",101,3,1)
+	-- -- draw lives
+	-- sspr2(118,7,10,5,7,120)
+	-- print("3",19,120)
+	-- -- draw timer
+	-- print("17:03",101,120)
+	-- draw ui entities
+	pal()
+	foreach(entities,function(entity)
+		if entity.is_user_interface then
+			entity:draw()
+			pal()
+		end
+	end)
 	-- draw guidelines
 	-- camera()
 	-- color(3)
@@ -1525,75 +1551,71 @@ function draw_game()
 	-- line(127,0,127,127) -- unused right line
 end
 
-function draw_background()
-	-- draw "curtains"
-	local curtains={1,83,7,57,18,25,22,9}
+-- particle functions
+function spawn_particle_burst(x,y,num_particles,color,speed)
 	local i
-	for i=1,#curtains,2 do
-		local x,y=curtains[i],curtains[i+1]
-		line(x,0,x,y,2)
-		line(126-x,0,126-x,y)
-	end
-	-- draw stars
-	local stars={29,19,88,7,18,41,44,3,102,43,24,45,112,62,11,70,5,108,120,91,110,119}
-	circ(18,41,1,1)
-	circ(112,62,1)
-	for i=1,#stars,2 do
-		pset(stars[i],stars[i+1])
+	for i=1,num_particles do
+		local angle,particle_speed=(i+rnd(0.7))/num_particles,speed*rnd_num(0.5,1.2)
+		spawn_entity("particle",x,y,{
+			vx=particle_speed*cos(angle),
+			vy=particle_speed*sin(angle)-speed/2,
+			color=color,
+			gravity=0.1,
+			friction=0.25,
+			frames_to_death=rnd_int(13,19)
+		})
 	end
 end
 
-function draw_tiles()
-	pal2(3)
-	-- draw tiles
-	local c,r
-	for c=0,7 do
-		for r=0,4 do
-			sspr2(93+(c+r)%2*11,76,11,9,10*c,8*r)
+function spawn_petals(x,y,num_petals,color)
+	local i
+	for i=1,num_petals do
+		spawn_entity("particle",x,y-2,{
+			vx=i-0.5-num_petals/2,
+			vy=rnd_num(-2,-1),
+			friction=0.1,
+			gravity=0.06,
+			frames_to_death=rnd_int(10,17),
+			color=color
+		})
+	end
+end
+
+-- magic tile functions
+function spawn_magic_tile(frames_to_death)
+	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{
+		frames_to_death=frames_to_death or 0
+	})
+end
+
+function on_magic_tile_picked_up(tile)
+	local phase,health=boss_health.phase,boss_health.health
+	if health<60 then
+		spawn_magic_tile(ternary(phase<1,80,120)-min(tile.frames_alive,30)) -- 30 frame grace period
+	end
+	if phase==0 then
+		if health==20 then
+			boss_health.visible=true
+		elseif health==40 then
+			boss=spawn_entity("magic_mirror")
+		elseif health==50 then
+			boss.visible=true
+		elseif health==60 then
+			boss:promise_sequence(
+				"intro",
+				"phase_change",
+				{"return_to_ready_position",nil,"right"},
+				"decide_next_action")
 		end
+	elseif phase>0 and health>=60 then
+		boss:promise_sequence(
+			"cancel_everything",
+			"reel",
+			"phase_change",
+			{"return_to_ready_position",2},
+			"decide_next_action")
 	end
-	-- draw some other grid stuff
-	color(1)
-	line(16,-1,64,-1)
-	line(16,41,64,41)
-	line(16,49,64,49)
-	sspr2(68,90,20,5,30,46)
-	for c=0,1 do
-		sspr2(59,102,16,2,65*c,-1,c==1,true)
-		sspr2(59,102,16,12,65*c,40,c==1)
-	end
-	pal()
 end
-
-function draw_ui()
-	pal2(3)
-	-- draw black boxes
-	rectfill(0,0,127,10,0)
-	rectfill(0,118,127,128)
-	if false then
-		-- draw score multiplier
-		sspr2(117,0,11,7,6,2)
-		print("4",8,3,0)
-		-- draw score
-		print("25700",101,3,1)
-		-- draw lives
-		sspr2(118,7,10,5,7,120)
-		print("3",19,120)
-		-- draw timer
-		print("17:03",101,120)
-	end
-	-- debug phase number
-	print(boss_health.phase,98,3,1)
-	-- draw ui entities
-	pal()
-	foreach(entities,function(entity)
-		if entity.is_user_interface then
-			entity:draw()
-			pal()
-		end
-	end)
-end
-
 
 -- entity functions
 function spawn_entity(class_name,x,y,args,skip_init)
@@ -1698,17 +1720,6 @@ function add_new_entities()
 		add(entities,entity)
 	end)
 	new_entities={}
-end
-
-function updates_before(a,b)
-	return a.update_priority>b.update_priority
-end
-
-function renders_on_top_of(a,b)
-	if a.render_layer==b.render_layer then
-		return a:row()>b:row()
-	end
-	return a.render_layer>b.render_layer
 end
 
 -- promise functions
@@ -1823,86 +1834,13 @@ function make_promise(ctx,fn,...)
 	}
 end
 
--- magic tile functions
-function on_magic_tile_picked_up(tile)
-	if boss_health.health<60 then
-		spawn_magic_tile(ternary(boss_health.phase<1,80,120)-min(tile.frames_alive,30)) -- 30 frame grace period
-	end
-	tiles_collected=increment_counter(tiles_collected)
-	if boss_health.phase==0 then
-		if tiles_collected==2 then
-			boss_health.visible=true
-		elseif tiles_collected==4 then
-			boss=spawn_entity("magic_mirror")
-		elseif tiles_collected==5 then
-			boss.visible=true
-		elseif tiles_collected==6 then
-			boss:promise_sequence(
-				"intro",
-				"phase_change",
-				{"return_to_ready_position",nil,"right"},
-				"decide_next_action")
-		end
-	elseif boss_health.phase>0 then
-		if boss_health.health>=60 then
-			boss:cancel_everything()
-			boss:promise_sequence(
-				"reel",
-				"phase_change",
-				{"return_to_ready_position",2},
-				{boss,"decide_next_action"})
-		end
-	end
-end
-
-function spawn_magic_tile(frames_to_death)
-	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{frames_to_death=max(10,frames_to_death or 0)})
-end
-
-function spawn_particle_burst(x,y,num_particles,color,speed)
-	local i
-	for i=1,num_particles do
-		local angle=(i+rnd(0.7))/num_particles
-		local particle_speed=speed*rnd_num(0.5,1.2)
-		spawn_entity("particle",x,y,{
-			vx=particle_speed*cos(angle),
-			vy=particle_speed*sin(angle)-speed/2,
-			color=color,
-			gravity=0.1,
-			friction=0.25,
-			frames_to_death=rnd_int(13,19)
-		})
-	end
-end
-
-function spawn_petals(x,y,num_petals,color)
-	local i
-	for i=1,num_petals do
-		spawn_entity("particle",x,y-2,{
-			vx=(i-num_petals/2),
-			vy=rnd_num(-2,-1),
-			friction=0.1,
-			gravity=0.06,
-			frames_to_death=rnd_int(10,17),
-			color=color
-		})
-	end
-end
-
 -- drawing functions
 function calc_rainbow_color()
-	local rainbow_color=8+flr(scene_frame/4)%6
-	color_ramps[16]=color_ramps[ternary(rainbow_color==13,14,rainbow_color)]
+	rainbow_color=8+flr(scene_frame/4)%6
 end
 
-function get_color(c,fade) -- fade between 3 (lightest) and -3 (darkest)
-	return color_ramps[c or 0][4-(fade or 0)]
-end
-
-function pal2(c1,c2,fade)
-	local c3=get_color(c2,fade or 0)
-	pal(c1,c3)
-	palt(c1,c3==0)
+function palt2(c)
+	palt(c,true)
 end
 
 function sspr2(x,y,width,height,x2,y2,flip_horizontal,flip_vertical)
@@ -1932,18 +1870,17 @@ function ease_out(percent)
 	return percent^2
 end
 
-function ease_in_out(percent)
+function ease_out_in(percent)
 	return ternary(percent<0.5,ease_out(2*percent)/2,0.5+ease_in(2*percent-1)/2)
 end
 
-function ease_out_in(percent)
-	return ternary(percent<0.5,ease_in(2*percent)/2,0.5+ease_out(2*percent-1)/2)
-end
+-- function ease_in_out(percent)
+-- 	return ternary(percent<0.5,ease_in(2*percent)/2,0.5+ease_out(2*percent-1)/2)
+-- end
 
 -- helper functions
 function freeze_and_shake_screen(f,s)
-	freeze_frames=max(f,freeze_frames)
-	screen_shake_frames=max(s,screen_shake_frames)
+	freeze_frames,screen_shake_frames=max(f,freeze_frames),max(s,screen_shake_frames)
 end
 
 -- round a number up to the nearest integer
