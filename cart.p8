@@ -5,7 +5,6 @@ __lua__
 coordinates:
   +x is right, -x is left
   +y is towards the player, -y is away from the player
-  +z is up, -z is down
            x=1   x=2.5
             v     v
           +---+---+
@@ -20,6 +19,19 @@ hurtbox_channels:
 	1: player
 	2: pickup
 	4: coin (stationary)
+
+todo:
+	player pain animation
+	green mirror doesn't have uggo pain face when lasering
+	summon flowers phase change animation
+	bump into coins to destroy them
+	phase 4 throw coins alternating
+	more coin throw pause but faster throw
+	death animation
+	title screen
+	death screen
+	victory screen
+	sound effects + music
 ]]
 
 -- useful noop function
@@ -30,7 +42,8 @@ local color_ramp_str="751000007d5100007e82100076b351007f94210076d510007776d51077
 local color_ramps={}
 
 -- global config vars
-local beginning_phase=3
+local beginning_phase=1
+local one_hit_ko=true
 local tiles_collected
 
 -- global scene vars
@@ -156,17 +169,16 @@ local entity_classes={
 				self:step(self.next_step_dir)
 			end
 			-- actually move
+			self.prev_col,self.prev_row=self:col(),self:row()
 			if self.stun_frames<=0 then
-				self.vx=0
-				self.vy=0
+				self.vx,self.vy=0,0
 				self:apply_step()
-				self.prev_col,self.prev_row=self:col(),self:row()
 				self:apply_velocity()
 				local col,row=self:col(),self:row()
 				if self.prev_col!=col or self.prev_row!=row then
 					-- teeter off the edge of the earth if the player tries to move off the map
 					if col!=mid(1,col,8) or row!=mid(1,row,5) then
-						self:undo_step(self.prev_col,self.prev_row)
+						self:undo_step()
 						self.teeter_frames=11
 					end
 					-- bump into an obstacle or reflection
@@ -193,11 +205,10 @@ local entity_classes={
 			end
 			-- teetering off the edge or bumping into a wall
 			if self.teeter_frames>0 or self.bump_frames>0 then
-				if self.bump_frames>0 then
-					spritesheet_x=66
-				else
+				spritesheet_x=66
+				if self.bump_frames<=0 then
 					local c=ternary(self.teeter_frames%4<2,8,9)
-					pal2(c,0)
+					pal2(c)
 					pal2(17-c,self.secondary_color)
 					spritesheet_x=44
 				end
@@ -216,8 +227,7 @@ local entity_classes={
 			end
 			-- getting hurt
 			if self.stun_frames>0 then
-				spritesheet_x,spritesheet_y,spritesheet_height,dx,dy=77,0,10,5,8
-				flipped=self.stun_frames%6>3
+				spritesheet_x,spritesheet_y,spritesheet_height,dx,dy,flipped=77,0,10,5,8,self.stun_frames%6>3
 			end
 			-- draw the sprite
 			pal2(3)
@@ -240,16 +250,12 @@ local entity_classes={
 			end
 		end,
 		bump=function(self)
-			self:undo_step(self.prev_col,self.prev_row)
+			self:undo_step()
 			self.bump_frames=11
 			freeze_and_shake_screen(0,5)
 		end,
-		undo_step=function(self,col,row)
-			self.x=10*col-5
-			self.y=8*row-4
-			self.step_dir=nil
-			self.next_step_dir=nil
-			self.step_frames=0
+		undo_step=function(self)
+			self.x,self.y,self.step_frames,self.step_dir,self.next_step_dir=10*self.prev_col-5,8*self.prev_row-4,0 -- ,nil,nil
 		end,
 		queue_step=function(self,dir)
 			if not self:step(dir) then
@@ -286,17 +292,16 @@ local entity_classes={
 		end,
 		on_hurt=function(self)
 			freeze_and_shake_screen(4,12)
-			self.invincibility_frames=60
-			self.stun_frames=19
+			self.invincibility_frames,self.stun_frames=60,19
 			player_health:lose_heart()
 		end
 	},
 	player_health={
 		x=63,
 		y=122,
-		visible=false,
+		-- visible=false,
 		hearts=4,
-		anim=nil,
+		-- anim=nil,
 		anim_frames=0,
 		is_user_interface=true,
 		update=function(self)
@@ -310,7 +315,7 @@ local entity_classes={
 				local i
 				for i=1,4 do
 					local sprite
-					sspr(0,30,9,7,self.x+8*i-24,self.y-3)
+					sspr2(0,30,9,7,self.x+8*i-24,self.y-3)
 					if self.anim=="gain" and i==self.hearts then
 						sprite=mid(1,5-flr(self.anim_frames/2),3)
 					elseif self.anim=="lose" and i==self.hearts+1 then
@@ -321,7 +326,7 @@ local entity_classes={
 						sprite=0
 					end
 					if sprite!=6 or self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
-						sspr(9*sprite,30,9,7,self.x+8*i-24,self.y-3)
+						sspr2(9*sprite,30,9,7,self.x+8*i-24,self.y-3)
 					end
 				end
 			end
@@ -346,36 +351,33 @@ local entity_classes={
 	boss_health={
 		x=63,
 		y=5,
-		visible=false,
+		-- visible=false,
 		health=0,
 		phase=0,
 		visible_health=0,
 		rainbow_frames=0,
 		is_user_interface=true,
 		update=function(self)
+			decrement_counter_prop(self,"rainbow_frames")
 			if self.health>=60 then
 				self.visible_health=60
-			end
-			if self.visible_health<self.health then
+			elseif self.visible_health<self.health then
 				self.visible_health+=1
-			end
-			if self.visible_health>self.health then
+			elseif self.visible_health>self.health then
 				self.visible_health-=1
 			end
-			decrement_counter_prop(self,"rainbow_frames")
 		end,
 		draw=function(self)
 			if self.visible then
 				local x,y=self.x,self.y
-				if self.rainbow_frames>0 then
-					pal2(5,16)
-				end
-				rect(x-30,y-3,x+30,y+3,5)
-				rectfill(x-30,y-3,x+mid(-30,-31+self.visible_health,29),y+3,5)
+				rect(x-30,y-3,x+30,y+3,get_color(ternary(self.rainbow_frames>0,16,5)))
+				rectfill(x-30,y-3,x+mid(-30,-31+self.visible_health,29),y+3)
 			end
 		end,
 		gain_health=function(self)
-			local health=ternary(self.phase<1,10,7)
+			-- 6 to start -> 10 hp per
+			-- 8 after that -> 8 hp per
+			local health=ternary(one_hit_ko,60,ternary(self.phase<1,10,8))
 			self.health=mid(0,self.health+health,60)
 			self.rainbow_frames=15+(self.health-self.visible_health)
 		end
@@ -433,23 +435,6 @@ local entity_classes={
 			spawn_entity("poof",self.x,self.y)
 		end,
 		update=function(self)
-				-- self:apply_step()
-				-- local prev_col,prev_row=self:col(),self:row()
-				-- self:apply_velocity()
-				-- local col,row=self:col(),self:row()
-				-- if prev_col!=col or prev_row!=row then
-				-- 	-- teeter off the edge of the earth if the player tries to move off the map
-				-- 	if col!=mid(1,col,8) or row!=mid(1,row,5) then
-				-- 		self:undo_step(prev_col,prev_row)
-				-- 		self.teeter_frames=11
-				-- 	end
-				-- 	-- bump into an obstacle or reflection
-				-- 	if is_tile_occupied(col,row) or (player_reflection and (prev_col<5)!=(col<5)) then
-				-- 		self:undo_step(prev_col,prev_row)
-				-- 		self.bump_frames=11
-				-- 		freeze_and_shake_screen(0,5)
-				-- 	end
-				-- end
 			local prev_col,prev_row=self:col(),self:row()
 			self:copy_player()
 			if (prev_col!=self:col() or prev_row!=self:row()) and is_tile_occupied(self:col(),self:row()) then
@@ -462,30 +447,19 @@ local entity_classes={
 			self:copy_player()
 		end,
 		copy_player=function(self)
-			local mirrored_directions={
-				left="right",
-				right="left",
-				up="up",
-				down="down"
-			}
-			self.x=80-player.x
-			self.y=player.y
-			self.facing=mirrored_directions[player.facing]
-			self.step_frames=player.step_frames
-			self.stun_frames=player.stun_frames
-			self.teeter_frames=player.teeter_frames
-			self.bump_frames=player.bump_frames
-			self.invincibility_frames=player.invincibility_frames
-			self.frames_alive=player.frames_alive
+			local mirrored_directions={left="right",right="left",up="up",down="down"}
+			self.x,self.y,self.facing=80-player.x,player.y,mirrored_directions[player.facing]
+			self.step_frames,self.stun_frames,self.teeter_frames=player.step_frames,player.stun_frames,player.teeter_frames
+			self.bump_frames,self.invincibility_frames,self.frames_alive=player.bump_frames,player.invincibility_frames,player.frames_alive
 		end
 	},
 	playing_card={
 		-- vx,has_heart
-		frames_to_death=110,
+		frames_to_death=75,
 		hitbox_channel=1, -- player
 		is_boss_generated=true,
 		update=function(self)
-			if self.frames_alive==65 and self.has_heart then
+			if self.frames_alive==50 and self.has_heart then
 				spawn_entity("heart",self.x,self.y)
 			end
 			self:apply_velocity()
@@ -512,9 +486,7 @@ local entity_classes={
 		hittable_frames=0,
 		init=function(self)
 			local c=rnd_int(1,3)
-			self.color=({8,14,15})[c]
-			self.accent_color=({15,7,14})[c]
-			self.flipped=rnd()<0.5
+			self.color,self.accent_color,self.flipped=({8,14,15})[c],({15,7,14})[c],rnd()<0.5
 		end,
 		update=function(self)
 			self.hitbox_channel=ternary(self.frames_to_death>self.hittable_frames,1,0) -- player
@@ -526,19 +498,8 @@ local entity_classes={
 			sspr2(9*ceil(self.frames_to_death/34)+88,85,9,8,self.x-4,self.y-4,self.flipped)
 		end,
 		bloom=function(self)
-			self.frames_to_death=ternary(boss_health.phase==4,10,38)
-			self.hittable_frames=self.frames_to_death-3
-			local i
-			for i=0,1 do
-				spawn_entity("particle",self.x,self.y-2,{
-					vx=(i-0.5),
-					vy=rnd_num(-2,-1),
-					friction=0.1,
-					gravity=0.06,
-					frames_to_death=rnd_int(10,17),
-					color=self.color
-				})
-			end
+			self.frames_to_death,self.hittable_frames=ternary(boss_health.phase==4,10,38),self.frames_to_death-3
+			spawn_petals(self.x,self.y,2,self.color)
 		end
 	},
 	coin={
@@ -588,6 +549,7 @@ local entity_classes={
 		end
 	},
 	particle={
+		render_layer=10,
 		extends="movable",
 		friction=0,
 		gravity=0,
@@ -779,12 +741,12 @@ local entity_classes={
 					:and_then(function()
 						boss_reflection:promise_sequence(
 							"return_to_ready_position",
-							24,
+							32,
 							{"conjure_flowers",3},
 							"return_to_ready_position")
 						return self:promise_sequence(
 							{"conjure_flowers",3},
-							17,
+							25,
 							{"conjure_flowers",3},
 							"return_to_ready_position")
 					end)
@@ -801,7 +763,7 @@ local entity_classes={
 						boss_reflection:promise_sequence(
 							{"throw_coins",3},
 							"return_to_ready_position")
-						return self:promise(
+						return self:promise_sequence(
 							{"throw_coins",3},
 							"return_to_ready_position",
 							100)
@@ -817,12 +779,24 @@ local entity_classes={
 		phase_change=function(self)
 			boss_health.phase+=1
 			boss_health.health=0
-			spawn_magic_tile(140)
-			if boss_health.phase==3 then
+			if boss_health.phase==2 then
+				return self:promise_sequence(
+					{"return_to_ready_position",2},
+					30,
+					{"set_all_idle",false},
+					10,
+					{"pound",0},
+					{"pound",0},
+					{"pound",3},
+					"conjure_bouquet",
+					"return_to_ready_position",
+					spawn_magic_tile)
+			elseif boss_health.phase==3 then
 				return self:promise_sequence(
 					{"return_to_ready_position",2},
 					"cast_reflection",
 					"return_to_ready_position",
+					spawn_magic_tile,
 					60)
 			elseif boss_health.phase==4 then
 				return self:promise_sequence(
@@ -831,8 +805,10 @@ local entity_classes={
 					function()
 						boss_reflection:promise("return_to_ready_position",1,"right")
 					end,
+					spawn_magic_tile,
 					{"return_to_ready_position",1,"left"})
 			else
+				spawn_magic_tile(140)
 				return self:promise(10)
 			end
 		end,
@@ -855,6 +831,11 @@ local entity_classes={
 			end)
 		end,
 		-- medium-level commands
+		pound=function(self,offset)
+			return self:promise_parallel(
+				{self.left_hand,"pound",offset},
+				{self.right_hand,"pound",-offset})
+		end,
 		reel=function(self)
 			local promise=self:promise_sequence(
 				{"set_expression",8},
@@ -878,6 +859,31 @@ local entity_classes={
 				10,
 				{"set_expression",5},
 				20)
+		end,
+		conjure_bouquet=function(self)
+			-- spawn_entity("bouquet",self.left_hand.x,self.left_hand.y)
+			self.left_hand.is_holding_bouquet=true
+			spawn_petals(self.left_hand.x,self.left_hand.y-6,4,8)
+			local promise=self:promise_sequence(
+				{"set_expression",1},
+				{self.right_hand,"set_pose",3},
+				{"move",20,-10,10,ease_in,{0,-5,-5,0},true},
+				35,
+				{self.left_hand,"move",self.x-2,self.y+11,20,ease_in},
+				{self,"set_expression",3},
+				30,
+				{self,"set_expression",1},
+				15)
+			promise:and_then_sequence(
+				10,
+				function()
+					self.left_hand.is_holding_bouquet=false
+					self.left_hand:set_pose(3)
+					self.left_hand:move(-18,6,20,ease_in,nil,true)
+				end)
+			return promise:and_then_sequence(
+				{self.right_hand,"move",0,10,20,ease_in_out,{-25,-20,-25,0},true},
+				15)
 		end,
 		conjure_flowers=function(self,density)
 			-- generate a list of flower locations
@@ -907,7 +913,7 @@ local entity_classes={
 				promise2=promise2:and_then("spawn_flower",flowers[i][1],flowers[i][2])
 			end
 			-- bloom the flowers
-			return promise:and_then_sequence(40,"bloom_flowers",30)
+			return promise:and_then_sequence(56,"bloom_flowers",30)
 		end,
 		cast_reflection=function(self,upgraded_version)
 			local promise=self:promise("summon_wands",upgraded_version)
@@ -1084,6 +1090,7 @@ local entity_classes={
 			return frames
 		end,
 		spawn_laser=function(self,frames)
+			freeze_and_shake_screen(0,4)
 			spawn_entity("mirror_laser",self.x,self.y,{frames_to_death=frames})
 			return frames
 		end,
@@ -1149,6 +1156,7 @@ local entity_classes={
 	magic_mirror_hand={
 		-- is_right_hand,dir
 		extends="movable",
+		-- is_holding_bouquet=false,
 		render_layer=8,
 		pose=3,
 		dir=-1,
@@ -1179,6 +1187,11 @@ local entity_classes={
 		draw=function(self)
 			local x,y=self.x+self.idle_x,self.y+self.idle_y
 			if self.visible then
+				if self.is_holding_bouquet then
+					pal2(4)
+					sspr2(97,85,9,16,self.x-1,self.y-12)
+					pal()
+				end
 				if self.is_reflection then
 					local i
 					for i=1,15 do
@@ -1206,7 +1219,7 @@ local entity_classes={
 		end,
 		-- highest-level commands
 		throw_cards=function(self,heart_row)
-			local promise=self:promise(13-self.dir*13)
+			local promise=self:promise(8-self.dir*8)
 				:and_then("set_idle",false)
 			local i
 			for i=ternary(self.is_right_hand,1,2),5,2 do
@@ -1223,12 +1236,12 @@ local entity_classes={
 				end)
 		end,
 		throw_card_at_row=function(self,row,has_heart)
-			return self:promise("move_to_row",row):and_then(12)
-				:and_then("set_pose",1):and_then("spawn_card",has_heart):and_then(12)
-				:and_then("set_pose",2):and_then(8)
+			return self:promise("move_to_row",row):and_then(6)
+				:and_then("set_pose",1):and_then("spawn_card",has_heart):and_then(6)
+				:and_then("set_pose",2):and_then(3)
 		end,
 		spawn_card=function(self,has_heart)
-			spawn_entity("playing_card",self.x-10*self.dir,self.y,{vx=-self.dir,has_heart=has_heart})
+			spawn_entity("playing_card",self.x-10*self.dir,self.y,{vx=-1.5*self.dir,has_heart=has_heart})
 		end,
 		grab_mirror_handle=function(self)
 			return self:promise_sequence(
@@ -1275,13 +1288,23 @@ local entity_classes={
 			self.visible=false
 			return self:poof()
 		end,
+		pound=function(self,offset)
+			return self:promise_sequence(
+				{"set_pose",2},
+				{"move",self.mirror.x+20*self.dir,self.mirror.y+20,10,ease_in}, -- move out
+				{"move",self.mirror.x+ternary(offset==0,4,0)*self.dir,self.mirror.y+20+offset,5,ease_out}, -- move in
+				function()
+					freeze_and_shake_screen(0,2)
+				end,
+				1)
+		end,
 		move_to_temple=function(self,mirror)
 			return self:promise("set_pose",1)
 				:and_then("move",mirror.x+13*self.dir,mirror.y,20)
 		end,
 		move_to_row=function(self,row)
 			return self:promise("set_pose",3)
-				:and_then("move",40+50*self.dir,8*row-4,20,ease_in_out,{10*self.dir,-10,10*self.dir,10})
+				:and_then("move",40+50*self.dir,8*row-4,18,ease_in_out,{10*self.dir,-10,10*self.dir,10})
 				:and_then("set_pose",2)
 		end,
 		set_pose=function(self,pose)
@@ -1833,7 +1856,7 @@ function on_magic_tile_picked_up(tile)
 end
 
 function spawn_magic_tile(frames_to_death)
-	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{frames_to_death=max(10,frames_to_death)})
+	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{frames_to_death=max(10,frames_to_death or 0)})
 end
 
 function spawn_particle_burst(x,y,num_particles,color,speed)
@@ -1852,6 +1875,20 @@ function spawn_particle_burst(x,y,num_particles,color,speed)
 	end
 end
 
+function spawn_petals(x,y,num_petals,color)
+	local i
+	for i=1,num_petals do
+		spawn_entity("particle",x,y-2,{
+			vx=(i-num_petals/2),
+			vy=rnd_num(-2,-1),
+			friction=0.1,
+			gravity=0.06,
+			frames_to_death=rnd_int(10,17),
+			color=color
+		})
+	end
+end
+
 -- drawing functions
 function calc_rainbow_color()
 	local rainbow_color=8+flr(scene_frame/4)%6
@@ -1859,7 +1896,7 @@ function calc_rainbow_color()
 end
 
 function get_color(c,fade) -- fade between 3 (lightest) and -3 (darkest)
-	return color_ramps[c or 0][4-fade]
+	return color_ramps[c or 0][4-(fade or 0)]
 end
 
 function pal2(c1,c2,fade)
@@ -2078,14 +2115,14 @@ __gfx__
 0000000000000000000000000000000000000000000000000000000000000000000031111333333333111130480000084438f8b0044088300043097777777903
 00000000000000000000000000000000000000000000000000000000000000000000111551000000015555108188888183b888bb0440880030439777777777f3
 0000000000000000000000000000000000000000000000000000000000000000000011115555555555555110884444488444b3444444444443439777777777f3
-0000000000000000000000000000000000000000000000000000000000000000000011111155555555511110000000000000000000000000000977777777777f
-0000000000000000000000000000000000000000000000000000000000000000000033331111111111133330000000000000000000000000000977777777777f
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009777777777779
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009777777777779
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009777777777779
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009777777777779
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003977777777793
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003977777777793
+00000000000000000000000000000000000000000000000000000000000000000000111111555555555111100000000004003b0004000000000977777777777f
+00000000000000000000000000000000000000000000000000000000000000000000333311111111111333300000000004003b0004000000000977777777777f
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004003300040000000009777777777779
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004003300040000000009777777777779
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004003100040000000009777777777779
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004001300040000000009777777777779
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004001300040000000003977777777793
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004441344440000000003977777777793
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003047777777403
 000000000000000000000000000000000000000000000000000000000005333333333333333000000000000000000000000000000000000000039949777949f3
 00000000000000000000000000000000000000000000000000000000000555511111111111100000000000000000000000000000000000000003944999994493
@@ -2151,16 +2188,16 @@ __map__
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
-010600003063030630306302463024620246202f0002f0002d0002d0052d0002d00500000000002d0002d0002b0002b0052b0002b00500000000002b0002b0002a0002a0002a0002a000300002f0002d0002b000
-01060000215502b5512b5512b5412b5310d5012900026000215002b5012b5012b5012b5012b50128000240002900024000280000000000000000000000000000000000000000000000000000000000000002d000
-0106000021120211151d1201d1152d000280002d0002f000300002f0002d0002b000290002800000000000000000000000000000000000000000000000000000000000000000000000000000000000000002f000
-010300001c7301c730186043060524600182001830018300184001840018500185001860018600187001870018200182000000000000000000000000000000000000000000000000000000000000000000000000
-010300001873018730000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0106000024540245302b5202b54013630136111360100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-01060000186701865018620247702b7702b7700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-010c0000185551c5551f5501f55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-010600000c2200c2210c2110c21100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-011000003065024631186210c61100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010c00000944000400094250942509440004000942509425094400040009425094250944000400094250942510440004001042510425104400040010425104250e440004000e4250e4250e440004000e4250e425
+010c00000944000400094250942509440004000942509425094400040009425094250944000400094250942509440004000942509425094400040009425094250944000400094250942509440004000942509425
+010c00002174028740247402873021730287302472028720217202871024710287102172028720247302873021740287402474028730217302873024720287202172028710247102871021720287202473028730
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -2216,7 +2253,7 @@ __sfx__
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __music__
-00 41424344
+03 02420144
 00 41424344
 00 41424344
 00 41424344
