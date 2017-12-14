@@ -23,7 +23,6 @@ hurtbox_channels:
 todo:
 	player pain animation
 	green mirror doesn't have uggo pain face when lasering
-	summon flowers phase change animation
 	bump into coins to destroy them
 	phase 4 throw coins alternating
 	more coin throw pause but faster throw
@@ -32,13 +31,23 @@ todo:
 	death screen
 	victory screen
 	sound effects + music
+
+entities to minify:
+	player_health
+	boss_health
+	magic_tile_spawn
+	player_reflection
+	coin
+	magic_mirror
+	magic_mirror_reflection
+	magic_mirror_hand
 ]]
 
 -- useful noop function
 function noop() end
 
 -- global config vars
-local beginning_phase=1
+local beginning_phase=2
 local one_hit_ko=false
 
 -- global scene vars
@@ -112,6 +121,7 @@ local entity_classes={
 					self.x,self.y,self.vx,self.vy,self.movement=move.final_x,move.final_y,0,0 -- ,nil
 				end
 			end
+			self:apply_velocity()
 		end,
 		move=function(self,x,y,dur,easing,anchors,is_relative)
 			local start_x,start_y,end_x,end_y=self.x,self.y,x,y
@@ -141,14 +151,14 @@ local entity_classes={
 	player={
 		hitbox_channel=2, -- pickup
 		hurtbox_channel=1, -- player
-		facing="right",
+		facing=1, -- 0 = left, 1 = right, 2 = up, 3 = down
 		step_frames=0,
 		teeter_frames=0,
 		bump_frames=0,
 		stun_frames=0,
 		primary_color=12,
 		secondary_color=13,
-		eye_color=0,
+		tertiary_color=0,
 		update=function(self)
 			decrement_counter_prop(self,"stun_frames")
 			decrement_counter_prop(self,"teeter_frames")
@@ -181,14 +191,12 @@ local entity_classes={
 		end,
 		draw=function(self)
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
-				local sx,sy,sh,dx,dy,facing,flipped=0,0,8,7,6,self.facing,self.facing=="left"
+				local sx,sy,sh,dx,dy,facing,flipped=0,0,8,3+4*self.facing,6,self.facing,self.facing==0
 				-- up/down sprites are below the left/right sprites in the spritesheet
-				if facing=="up" then
+				if facing==2 then
 					sy,sh,dx=8,11,5
-				elseif facing=="down" then
+				elseif facing==3 then
 					sy,sh,dx,dy=19,11,5,9
-				elseif facing=="left" then
-					dx=3
 				end
 				-- moving between tiles
 				if self.step_frames>0 then
@@ -203,14 +211,10 @@ local entity_classes={
 						pal(17-c,self.secondary_color)
 						sx=44
 					end
-					if facing=="up" then
-						dy+=3
-					elseif facing=="down" then
-						dy-=2
-					elseif facing=="left" then
-						dx+=4
-					elseif facing=="right" then
-						dx-=4
+					if facing>1 then
+						dy+=13-5*facing
+					else
+						dx+=4-facing*8
 					end
 					if self.teeter_frames<3 and self.bump_frames<3 then
 						sx=55
@@ -224,19 +228,17 @@ local entity_classes={
 				palt2(3)
 				pal(12,self.primary_color)
 				pal(13,self.secondary_color)
-				pal(1,self.eye_color)
+				pal(1,self.tertiary_color)
 				sspr2(sx,sy,11,sh,self.x-dx,self.y-dy,flipped)
 			end
 		end,
 		check_inputs=function(self)
-			if btnp(0) then
-				self:queue_step("left")
-			elseif btnp(1) then
-				self:queue_step("right")
-			elseif btnp(2) then
-				self:queue_step("up")
-			elseif btnp(3) then
-				self:queue_step("down")
+			local i
+			for i=0,3 do
+				if btnp(i) then
+					self:queue_step(i)
+					break
+				end
 			end
 		end,
 		bump=function(self)
@@ -261,15 +263,10 @@ local entity_classes={
 		apply_step=function(self)
 			local dir,dist=self.step_dir,self.step_frames
 			if dir then
-				local dist_vertical=ternary(dist>2,dist-1,dist)
-				if dir=="left" then
-					self.vx-=dist
-				elseif dir=="right" then
-					self.vx+=dist
-				elseif dir=="up" then
-					self.vy-=dist_vertical
-				elseif dir=="down" then
-					self.vy+=dist_vertical
+				if dir>1 then
+					self.vy+=(2*dir-5)*ternary(dist>2,dist-1,dist)
+				else
+					self.vx+=2*dir*dist-dist
 				end
 				if decrement_counter_prop(self,"step_frames") then
 					self.step_dir=nil
@@ -422,7 +419,7 @@ local entity_classes={
 		update_priority=10,
 		primary_color=11,
 		secondary_color=3,
-		eye_color=3,
+		tertiary_color=3,
 		init=function(self)
 			self:copy_player()
 			spawn_entity("poof",self.x,self.y)
@@ -440,8 +437,9 @@ local entity_classes={
 			self:copy_player()
 		end,
 		copy_player=function(self)
-			local mirrored_directions={left="right",right="left",up="up",down="down"}
-			self.x,self.y,self.facing=80-player.x,player.y,mirrored_directions[player.facing]
+			-- 0 = left, 1 = right, 2 = up, 3 = down
+			local mirrored_directions={1,0,2,3}
+			self.x,self.y,self.facing=80-player.x,player.y,mirrored_directions[player.facing+1]
 			self.step_frames,self.stun_frames,self.teeter_frames=player.step_frames,player.stun_frames,player.teeter_frames
 			self.bump_frames,self.invincibility_frames,self.frames_alive=player.bump_frames,player.invincibility_frames,player.frames_alive
 		end
@@ -476,22 +474,33 @@ local entity_classes={
 	flower_patch={
 		render_layer=4,
 		is_boss_generated=true,
-		hittable_frames=0,
+		color=8,
+		accent_color=15,
+		hit_frames=0,
 		init=function(self)
-			local c=rnd_int(1,3)
-			self.color,self.accent_color,self.flipped=({8,14,15})[c],({15,7,14})[c],rnd()<0.5
+			if rnd()<0.5 then
+				self.color,self.accent_color=14,7
+			end
 		end,
 		update=function(self)
-			self.hitbox_channel=ternary(self.frames_to_death>self.hittable_frames,1,0) -- player
+			if decrement_counter_prop(self,"hit_frames") then
+				self.hitbox_channel=0
+			end
 		end,
 		draw=function(self)
 			palt2(4)
 			pal(8,self.color)
 			pal(15,self.accent_color)
-			sspr2(9*ceil(self.frames_to_death/34)+88,85,9,8,self.x-4,self.y-4,self.flipped)
+			local sx=88
+			if self.hit_frames>0 then
+				sx=106
+			elseif self.frames_to_death>0 then
+				sx=97
+			end
+			sspr2(sx,85,9,8,self.x-4,self.y-4)
 		end,
 		bloom=function(self)
-			self.frames_to_death,self.hittable_frames=ternary(boss_health.phase==4,10,38),self.frames_to_death-3
+			self.frames_to_death,self.hit_frames,self.hitbox_channel=ternary(boss_health.phase==4,10,38),3,1
 			spawn_petals(self.x,self.y,2,self.color)
 		end
 	},
@@ -516,7 +525,6 @@ local entity_classes={
 		end,
 		update=function(self)
 			self:apply_move()
-			self:apply_velocity()
 		end,
 		draw=function(self)
 			palt2(3)
@@ -544,20 +552,18 @@ local entity_classes={
 	particle={
 		render_layer=10,
 		extends="movable",
-		friction=0,
+		friction=1,
 		gravity=0,
 		color=7,
 		init=function(self)
-			self.prev_x,self.prev_y=self.x,self.y
-			self:apply_velocity()
+			self:update()
 		end,
 		update=function(self)
 			self.vy+=self.gravity
-			self.vx*=(1-self.friction)
-			self.vy*=(1-self.friction)
+			self.vx*=self.friction
+			self.vy*=self.friction
 			self.prev_x,self.prev_y=self.x,self.y
 			self:apply_move()
-			self:apply_velocity()
 		end,
 		draw=function(self)
 			line(self.x,self.y,self.prev_x,self.prev_y,ternary(self.color==16,rainbow_color,self.color))
@@ -594,7 +600,6 @@ local entity_classes={
 			decrement_counter_prop(self,"laser_charge_frames")
 			decrement_counter_prop(self,"laser_preview_frames")
 			self:apply_move()
-			self:apply_velocity()
 			-- create particles when charging laser
 			if self.laser_charge_frames>0 then
 				local x,y,angle=self.x,self.y,rnd()
@@ -1153,7 +1158,6 @@ local entity_classes={
 			self.idle_x=self.idle_mult*3*sin(f/60)
 			self.idle_y=self.idle_mult*4*sin(f/30)
 			self:apply_move()
-			self:apply_velocity()
 			if self.is_holding_mirror then
 				self.idle_x=self.mirror.idle_x
 				self.idle_y=self.mirror.idle_y
@@ -1305,7 +1309,7 @@ local entity_classes={
 		end,
 		is_hitting=function(self,entity)
 			return self:col()==entity:col()
-		end,
+		end
 	},
 	heart={
 		frames_to_death=150,
@@ -1321,7 +1325,7 @@ local entity_classes={
 			end
 		end,
 		on_hurt=function(self)
-			freeze_frames=2
+			freeze_and_shake_screen(2,0)
 			player_health:gain_heart()
 			spawn_particle_burst(self.x,self.y,6,8,4)
 			self:die()
@@ -1551,7 +1555,7 @@ function spawn_particle_burst(x,y,num_particles,color,speed)
 			vy=particle_speed*sin(angle)-speed/2,
 			color=color,
 			gravity=0.1,
-			friction=0.25,
+			friction=0.75,
 			frames_to_death=rnd_int(13,19)
 		})
 	end
@@ -1563,7 +1567,7 @@ function spawn_petals(x,y,num_petals,color)
 		spawn_entity("particle",x,y-2,{
 			vx=i-0.5-num_petals/2,
 			vy=rnd_num(-2,-1),
-			friction=0.1,
+			friction=0.9,
 			gravity=0.06,
 			frames_to_death=rnd_int(10,17),
 			color=color
@@ -1574,7 +1578,7 @@ end
 -- magic tile functions
 function spawn_magic_tile(frames_to_death)
 	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{
-		frames_to_death=frames_to_death or 0
+		frames_to_death=frames_to_death or 10
 	})
 end
 
@@ -1827,6 +1831,9 @@ end
 -- drawing functions
 function calc_rainbow_color()
 	rainbow_color=8+flr(scene_frame/4)%6
+	if rainbow_color==13 then
+		rainbow_color=14
+	end
 end
 
 function palt2(c)
