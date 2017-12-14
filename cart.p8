@@ -23,7 +23,6 @@ hurtbox_channels:
 todo:
 	player pain animation
 	green mirror doesn't have uggo pain face when lasering
-	bump into coins to destroy them
 	phase 4 throw coins alternating
 	more coin throw pause but faster throw
 	death animation
@@ -33,13 +32,7 @@ todo:
 	sound effects + music
 
 entities to minify:
-	player_health
-	boss_health
-	magic_tile_spawn
-	player_reflection
-	coin
 	magic_mirror
-	magic_mirror_reflection
 	magic_mirror_hand
 ]]
 
@@ -183,8 +176,12 @@ local entity_classes={
 						self.teeter_frames=11
 					end
 					-- bump into an obstacle or reflection
-					if is_tile_occupied(col,row) or (player_reflection and (self.prev_col<5)!=(col<5)) then
+					local occupant=get_tile_occupant(col,row)
+					if occupant or (player_reflection and (self.prev_col<5)!=(col<5)) then
 						self:bump()
+						if occupant then
+							occupant:get_bumped()
+						end
 					end
 				end
 			end
@@ -301,16 +298,14 @@ local entity_classes={
 				palt2(3)
 				local i
 				for i=1,4 do
-					local sprite
 					sspr2(0,30,9,7,self.x+8*i-24,self.y-3)
+					local sprite=0
 					if self.anim=="gain" and i==self.hearts then
 						sprite=mid(1,5-flr(self.anim_frames/2),3)
 					elseif self.anim=="lose" and i==self.hearts+1 then
 						sprite=6
 					elseif i<=self.hearts then
 						sprite=4
-					else
-						sprite=0
 					end
 					if sprite!=6 or self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
 						sspr2(9*sprite,30,9,7,self.x+8*i-24,self.y-3)
@@ -336,8 +331,8 @@ local entity_classes={
 		end
 	},
 	boss_health={
-		x=63,
-		y=5,
+		-- x=63,
+		-- y=5,
 		-- visible=false,
 		health=0,
 		phase=0,
@@ -356,16 +351,14 @@ local entity_classes={
 		end,
 		draw=function(self)
 			if self.visible then
-				local x,y=self.x,self.y
-				rect(x-30,y-3,x+30,y+3,ternary(self.rainbow_frames>0,rainbow_color,5))
-				rectfill(x-30,y-3,x+mid(-30,-31+self.visible_health,29),y+3)
+				rect(33,2,93,8,ternary(self.rainbow_frames>0,rainbow_color,5))
+				rectfill(33,2,mid(33,32+self.visible_health,92),8)
 			end
 		end,
 		gain_health=function(self)
 			-- 6 to start -> 10 hp per
 			-- 8 after that -> 8 hp per
-			local health=ternary(one_hit_ko,60,ternary(self.phase<1,10,8))
-			self.health=mid(0,self.health+health,60)
+			self.health=mid(0,self.health+ternary(one_hit_ko,60,ternary(self.phase<1,10,8)),60)
 			self.rainbow_frames=15+(self.health-self.visible_health)
 		end
 	},
@@ -387,7 +380,7 @@ local entity_classes={
 		render_layer=3,
 		hurtbox_channel=2, -- pickup
 		update=function(self)
-			if is_tile_occupied(self:col(),self:row()) then
+			if get_tile_occupant(self:col(),self:row()) then
 				self:die()
 				spawn_magic_tile()
 			end
@@ -427,9 +420,11 @@ local entity_classes={
 		update=function(self)
 			local prev_col,prev_row=self:col(),self:row()
 			self:copy_player()
-			if (prev_col!=self:col() or prev_row!=self:row()) and is_tile_occupied(self:col(),self:row()) then
+			local occupant=get_tile_occupant(self:col(),self:row())
+			if (prev_col!=self:col() or prev_row!=self:row()) and occupant then
 				player:bump()
 				self:copy_player()
+				occupant:get_bumped()
 			end
 		end,
 		on_hurt=function(self,entity)
@@ -507,16 +502,19 @@ local entity_classes={
 	coin={
 		extends="movable",
 		is_boss_generated=true,
+		health=3,
 		init=function(self)
-			self.target_x,self.target_y=10*player:col()-5,8*player:row()-4
+			self.target_x,self.target_y=10*self.target:col()-5,8*self.target:row()-4
 			self:promise_sequence(
-				{"move",self.target_x+2,self.target_y,30,ease_out,{20,-30,10,-60}},2,
+				{"move",self.target_x+2,self.target_y,30,ease_out,{20,-30,10,-60}},
+				2,
 				function()
 					self.hitbox_channel=5 -- player, coin
 					self.occupies_tile=true
 					freeze_and_shake_screen(2,2)
 				end,
-				{"move",-1,-4,3,ease_in,nil,true},2,
+				{"move",-1,-4,3,ease_in,nil,true},
+				2,
 				{"move",-1,4,3,ease_out,nil,true},
 				function()
 					self.hitbox_channel=1 -- player
@@ -536,11 +534,17 @@ local entity_classes={
 				sprite=2
 			end
 			if self.frames_alive>=30 then
-				sprite=ternary(self.has_heart,5,4)
+				sprite=ternary(self.health<3,5,4)
 			else
 				sprite+=flr(self.frames_alive/3)%2
 			end
 			sspr(9*sprite,62,9,9,self.x-4,self.y-5)
+		end,
+		get_bumped=function(self)
+			self.health-=1
+			if self.health<=0 then
+				self:die()
+			end
 		end,
 		on_death=function(self)
 			spawn_particle_burst(self.x,self.y,6,6,4)
@@ -1101,7 +1105,7 @@ local entity_classes={
 			return 1
 		end,
 		spawn_coin=function(self,has_heart)
-			add(self.coins,spawn_entity("coin",self.x+12,self.y,{has_heart=has_heart}))
+			add(self.coins,spawn_entity("coin",self.x+12,self.y,{target=player}))
 		end,
 		don_top_hat=function(self)
 			self.is_wearing_top_hat=true
@@ -1116,8 +1120,8 @@ local entity_classes={
 		end,
 	},
 	magic_mirror_reflection={
-		render_layer=5,
 		extends="magic_mirror",
+		render_layer=5,
 		visible=true,
 		expression=1,
 		is_wearing_top_hat=true,
@@ -1125,14 +1129,8 @@ local entity_classes={
 		is_reflection=true,
 		init=function(self)
 			self:super_init()
-			self.left_hand.visible=true
-			self.left_hand.pose=boss.left_hand.pose
-			self.left_hand.x=boss.left_hand.x
-			self.left_hand.y=boss.left_hand.y
-			self.right_hand.visible=true
-			self.right_hand.pose=boss.right_hand.pose
-			self.right_hand.x=boss.right_hand.x
-			self.right_hand.y=boss.right_hand.y
+			self.left_hand:copy_hand(boss.left_hand)
+			self.right_hand:copy_hand(boss.right_hand)
 		end
 	},
 	magic_mirror_hand={
@@ -1145,6 +1143,9 @@ local entity_classes={
 		idle_mult=0,
 		idle_x=0,
 		idle_y=0,
+		copy_hand=function(self,hand)
+			self.pose,self.x,self.y,self.visible=hand.pose,hand.x,hand.y,hand.visible
+		end,
 		update=function(self)
 			if self.is_reflection then
 				self.render_layer=6
@@ -1647,8 +1648,10 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			end,
 			draw=noop,
 			die=function(self)
-				self:on_death()
-				self.finished=true
+				if not self.finished then
+					self:on_death()
+					self.finished=true
+				end
 			end,
 			despawn=function(self)
 				self.finished=true
@@ -1845,11 +1848,11 @@ function sspr2(x,y,width,height,x2,y2,flip_horizontal,flip_vertical)
 end
 
 -- tile functions
-function is_tile_occupied(col,row)
+function get_tile_occupant(col,row)
 	local e
 	for e in all(entities) do
 		if e.occupies_tile and e:col()==col and e:row()==row then
-			return true
+			return e
 		end
 	end
 end
@@ -2018,15 +2021,15 @@ __gfx__
 30d77dd7777730d77dd770033066666666033067677700033066677600033007776d000300000000000000000000000000000000000000000000000000000000
 30d67777700330d67777600330006666dd033006666d0003306676600003300066dd000300000000000000000000000000000000000000000000000000000000
 333366663333333366663333333333ddd333333366d33333333dddd333333333ddd3333300000000000000000000000000000000000000000000000000000000
-33333333333333333333333333333dddd33333666663333666663300000000000000000000000000000000000000000000000000000000000000000000000000
-3000000033000000033000000033dddddd033666d7763366d6d76300000000000000000000000000000000000000000000000000000000000000000000000000
-300000003300dd0003660000003dddddddd3666ddd77666d6d7d7600000000000000000000000000000000000000000000000000000000000000000000000000
-30660000330dddd003666600003dddddddd3666d6667666d666d7600000000000000000000000000000000000000000000000000000000000000000000000000
+33333333333333333333333333333dddd33333666663333666d63300000000000000000000000000000000000000000000000000000000000000000000000000
+3000000033000000033000000033dddddd033666d77633d66d776300000000000000000000000000000000000000000000000000000000000000000000000000
+300000003300dd0003660000003dddddddd3666ddd77666dddd77600000000000000000000000000000000000000000000000000000000000000000000000000
+30660000330dddd003666600003dddddddd3666d66676666d6667600000000000000000000000000000000000000000000000000000000000000000000000000
 30006600330dddd003306666003dddddddd3666ddd666666ddd66600000000000000000000000000000000000000000000000000000000000000000000000000
-300000003300dd0003300066663dddddddd3d666d666dd666d666d00000000000000000000000000000000000000000000000000000000000000000000000000
+300000003300dd0003300066663dddddddd3d666d666dd6d6d6d6d00000000000000000000000000000000000000000000000000000000000000000000000000
 3000000033000000033000006633dddddd03dd66666dddd66666dd00000000000000000000000000000000000000000000000000000000000000000000000000
-30000000330000000330000000330dddd0033d5ddddd33d5ddddd300000000000000000000000000000000000000000000000000000000000000000000000000
-333333333333333333333333333333333333335d5d533335d5d53300000000000000000000000000000000000000000000000000000000000000000000000000
+30000000330000000330000000330dddd0033d5ddddd33d5dddd5300000000000000000000000000000000000000000000000000000000000000000000000000
+333333333333333333333333333333333333335d5d53333555d53300000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
