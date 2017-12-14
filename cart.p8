@@ -41,7 +41,7 @@ todo:
 function noop() end
 
 -- global config vars
-local beginning_phase=2
+local beginning_phase=1
 local one_hit_ko=false
 
 -- global scene vars
@@ -723,27 +723,55 @@ local entity_classes={
 				end)
 		end,
 		phase_change=function(self)
+			local lh=self.left_hand
 			boss_health.phase+=1
 			boss_health.health=0
 			if boss_health.phase==1 then
 				return self:promise_sequence(
 					50,
-					{self.left_hand,"appear"},30,
-					{"set_pose",4},6,
-					{"set_pose",5},6,
-					{"set_pose",4},6,
-					{"set_pose",5},6,
-					{"set_pose",4},10,
-					{self.right_hand,"appear"},15,
-					"grab_mirror_handle",5,
-					{self,"set_expression"},33,
-					{"set_expression",6},25,
-					"set_expression",33,
-					{"set_expression",1},30,
-					{function()
-						self.left_hand:tap_mirror(self)
-					end},10,
-					"don_top_hat",30)
+					{lh,"appear"},
+					30,
+					{"set_pose",4},
+					6,
+					{"set_pose",5},
+					6,
+					{"set_pose",4},
+					6,
+					{"set_pose",5},
+					6,
+					{"set_pose",4},
+					10,
+					{self.right_hand,"appear"},
+					15,
+					"grab_mirror_handle",
+					5,
+					{self,"set_expression"},
+					33,
+					{"set_expression",6},
+					25,
+					"set_expression",
+					33,
+					{"set_expression",1},
+					30,
+				-- tap mirror
+					function()
+						lh:promise_sequence(
+							9,
+							{"set_pose",5},
+							4,
+							{"set_pose",4})	
+						lh:promise_sequence(
+							{"move",self.x+5*lh.dir,self.y-3,10,ease_out,{0,-10,10*lh.dir,-2}},
+							2,
+							{"move",lh.x,lh.y,10,ease_in,{10*lh.dir,-2,0,-10}})
+					end,
+					10,
+				-- poof! a top hat appears
+					function()
+						self.is_wearing_top_hat=true
+					end,
+					{"poof",0,-10},
+					30)
 			elseif boss_health.phase==2 then
 				return self:promise_sequence(
 					{"return_to_ready_position",2},
@@ -777,23 +805,14 @@ local entity_classes={
 				return self:promise(10)
 			end
 		end,
-		cancel_everything=function(self)
+		cancel_everything=function(self) -- minified
 			self.left_hand:cancel_everything()
 			self.right_hand:cancel_everything()
 			self:cancel_promises()
 			self:cancel_move()
-			self.laser_charge_frames=0
-			self.laser_preview_frames=0
-			foreach(entities,function(entity)
-				if entity.is_boss_generated then
-					entity:despawn()
-				end
-			end)
-			foreach(new_entities,function(entity)
-				if entity.is_boss_generated then
-					entity:despawn()
-				end
-			end)
+			self.laser_charge_frames,self.laser_preview_frames=0,0
+			despawn_boss_entities(entities)
+			despawn_boss_entities(new_entities)
 		end,
 		-- medium-level commands
 		pound=function(self,offset)
@@ -892,45 +911,55 @@ local entity_classes={
 				{self,"set_expression",3},
 				30)
 		end,
-		cast_reflection=function(self,upgraded_version)
-			local promise=self:promise("summon_wands",upgraded_version)
-				:and_then(30)
-			if upgraded_version then
-				promise:and_then(self.right_hand,"cast_spell")
+		cast_reflection=function(self,upgraded_version) -- minified
+			local lh,rh,i=self.left_hand,self.right_hand
+			-- concentrate
+			local promise=self:promise_sequence(
+				"set_all_idle",
+				{"set_expression",2},
+				{lh,"move",23,14,20,ease_in,nil,true},
+				{"set_pose",1})
+			-- wave one hand over the other
+			for i=1,2 do
+				promise=promise:and_then_sequence(
+					{rh,"move",-10,0,20,linear,{0,-3,0,-3},true},
+					{"move",10,0,20,linear,{0,3,0,3},true})
 			end
-			return promise:and_then(self.left_hand,"cast_spell")
-				:and_then(self,"set_expression",3)
-				:and_then(5)
-				:and_then(function()
+			-- poof! the wands appear
+			if upgraded_version then
+				promise:and_then_sequence(
+					{rh,"set_pose",1},
+					function()
+						rh.is_holding_wand=true
+					end,
+					{"poof",-10})
+			end
+			promise=promise:and_then_sequence(
+				{self,"set_expression",1},
+				function()
+					lh.is_holding_wand=true
+				end,
+				{lh,"poof",10},
+				30)
+			-- raise the wands to cast a spell
+			if upgraded_version then
+				promise:and_then(rh,"flourish_wand")
+			end
+			return promise:and_then_sequence(
+				{lh,"flourish_wand"},
+				{self,"set_expression",3},
+				5,
+			-- and finally the spell takes effect
+				function()
 					if upgraded_version then
 						boss_reflection=spawn_entity("magic_mirror_reflection")
 						self.home_x+=20
 					else
 						player_reflection=spawn_entity("player_reflection")
 					end
-				end)
-				:and_then(55)
-		end,
-		summon_wands=function(self,right_hand_too)
-			local promise=self:promise("set_all_idle",false)
-				:and_then("set_expression",2)
-				:and_then(self.left_hand,"move",23,14,20,ease_in,nil,true)
-				:and_then("set_pose",1)
-			local i
-			for i=1,2 do
-				promise=promise
-					:and_then(self.right_hand,"move",-10,0,20,linear,{0,-3,0,-3},true)
-					:and_then("move",10,0,20,linear,{0,3,0,3},true)
-			end
-			if right_hand_too then
-				promise
-					:and_then(self.right_hand,"set_pose",1)
-					:and_then("summon_wand")
-			end
-			return promise
-				:and_then(self,"set_expression",1)
-				:and_then(self.left_hand,"summon_wand")
-				:and_then(self)
+				end,
+			-- cooldown
+				55)
 		end,
 		throw_cards=function(self,heart_row,hand) -- minified
 			heart_row=heart_row or rnd_int(1,5)
@@ -999,7 +1028,7 @@ local entity_classes={
 		end,
 		return_to_ready_position=function(self,expression,held_hand) -- minified
 			local lh,rh,home_x,home_y=self.left_hand,self.right_hand,self.home_x,self.home_y
-			lh.holding_wand,rh.holding_wand=false,false
+			lh.is_holding_wand,rh.is_holding_wand=false,false
 			-- reset to a default expression/pose
 			return self:promise_sequence(
 				{"set_all_idle",true},
@@ -1054,14 +1083,6 @@ local entity_classes={
 			self:set_idle(idle)
 			self.left_hand:set_idle(idle)
 			self.right_hand:set_idle(idle)
-		end,
-		don_top_hat=function(self)
-			self.is_wearing_top_hat=true
-			return self:poof(0,-10)
-		end,
-		poof=function(self,dx,dy)
-			spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
-			return 12
 		end,
 		set_expression=function(self,expression) -- minified
 			self.expression=expression or 5
@@ -1123,7 +1144,7 @@ local entity_classes={
 				local is_right_hand=self.is_right_hand
 				sspr2(12*self.pose-12,51,12,11,x-ternary(is_right_hand,7,4),y,is_right_hand)
 				-- hand may be holding a wand
-				if self.holding_wand then
+				if self.is_holding_wand then
 					if self.pose==1 then
 						sspr2(64,30,7,13,x+ternary(is_right_hand,-10,4),y,is_right_hand)
 					else
@@ -1163,15 +1184,16 @@ local entity_classes={
 			end
 			return promise
 		end,
-		cast_spell=function(self)
-			return self:promise("move",40+20*self.dir,-30,12,ease_out,{-20,20,0,20},false)
-				:and_then("set_pose",6)
-				:and_then(function()
+		flourish_wand=function(self) -- minified
+			return self:promise_sequence(
+				{"move",40+20*self.dir,-30,12,ease_out,{-20,20,0,20}},
+				{"set_pose",6},
+				function()
 					spawn_particle_burst(self.x,self.y-20,20,3,10)
 					freeze_and_shake_screen(0,20)
 				end)
 		end,
-		grab_mirror_handle=function(self)
+		grab_mirror_handle=function(self) -- minified
 			return self:promise_sequence(
 				"set_pose",
 				{"move",self.mirror.x+2*self.dir,self.mirror.y+13,10,ease_out,{10*self.dir,5,0,20}},
@@ -1182,27 +1204,13 @@ local entity_classes={
 		end,
 		cancel_everything=function(self)
 			self:cancel_promises()
-			self.holding_wand=false
-			self.is_holding_mirror=false
 			self:cancel_move()
-		end,
-		tap_mirror=function(self,mirror)
-			self:promise(9)
-				:and_then("set_pose",5)
-				:and_then(4)
-				:and_then("set_pose",4)
-			return self:promise("move",mirror.x+5*self.dir,mirror.y-3,10,ease_out,{0,-10,10*self.dir,-2})
-				:and_then(2)
-				:and_then("move",self.x,self.y,10,ease_in,{10*self.dir,-2,0,-10})
-		end,
-		summon_wand=function(self)
-			self.holding_wand=true
-			return self:promise("poof",-10*self.dir)
+			self.is_holding_wand,self.is_holding_mirror=false -- ,nil
 		end,
 		set_idle=function(self,idle)
 			self.is_idle=idle
 		end,
-		release_mirror=function(self)
+		release_mirror=function(self) -- minified
 			self.is_holding_mirror=false
 			return self:promise_sequence(
 				"set_pose",
@@ -1228,18 +1236,15 @@ local entity_classes={
 				end,
 				1)
 		end,
-		move_to_temple=function(self)
-			return self:promise("set_pose",1)
-				:and_then("move",self.mirror.x+13*self.dir,self.mirror.y,20)
+		move_to_temple=function(self) -- minified
+			return self:promise_sequence(
+				{"set_pose",1},
+				{"move",self.mirror.x+13*self.dir,self.mirror.y,20})
 		end,
 		set_pose=function(self,pose) -- minified
 			if not self.is_holding_mirror then
 				self.pose=pose or 3
 			end
-		end,
-		poof=function(self,dx,dy)
-			spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
-			return 12
 		end
 	},
 	mirror_laser={
@@ -1350,7 +1355,7 @@ function init_game()
 		boss.visible,boss_health.visible,boss_health.phase=true,true,beginning_phase-1
 		if beginning_phase>1 then
 			boss:set_expression(1)
-			boss:don_top_hat()
+			boss.is_wearing_top_hat=true
 			boss.right_hand:appear()
 			boss.left_hand:appear()
 		end
@@ -1635,6 +1640,11 @@ function spawn_entity(class_name,x,y,args,skip_init)
 						promise:cancel()
 					end
 				end)
+			end,
+			-- shared methods tacked on here to save tokens
+			poof=function(self,dx,dy)
+				spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
+				return 12
 			end
 		}
 	end
@@ -1665,6 +1675,14 @@ function add_new_entities()
 		add(entities,entity)
 	end)
 	new_entities={}
+end
+
+function despawn_boss_entities(list)
+	foreach(list,function(entity)
+		if entity.is_boss_generated then
+			entity:despawn()
+		end
+	end)
 end
 
 -- promise functions
