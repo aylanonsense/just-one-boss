@@ -21,15 +21,18 @@ hurtbox_channels:
 	4: coin (stationary)
 
 todo:
-	player pain animation
+	player pain effect
 	green mirror doesn't have uggo pain face when lasering
 	phase 4 throw coins alternating
 	more coin throw pause but faster throw
-	death animation
+	boss death animation
 	title screen
-	death screen
-	victory screen
+	player death screen
+	player victory screen
 	sound effects + music
+	hard mode?
+	perhaps only 6 columns? only 4 rows?
+	get rid of the spritesheet blocking, will save some tokens on palt calls
 
 7686 tokens before minifying the boss
 3138 tokens spent on magic_mirror and magic_mirror_hand
@@ -41,7 +44,7 @@ todo:
 function noop() end
 
 -- global config vars
-local beginning_phase=1
+local beginning_phase=0
 local one_hit_ko=false
 
 -- global scene vars
@@ -669,7 +672,6 @@ local entity_classes={
 					"shoot_lasers",
 					"return_to_ready_position")
 			elseif boss_health.phase==3 then
-				-- todo 3 repeated batches of flowers
 				promise=self:promise_sequence(
 					"shoot_lasers",
 					"return_to_ready_position",
@@ -682,38 +684,39 @@ local entity_classes={
 					"return_to_ready_position")
 			elseif boss_health.phase==4 then
 				promise=self:promise_parallel(
-					{self,"set_held_state",nil},
-					{boss_reflection,"set_held_state",nil})
-					:and_then(function()
+						{self,"set_held_state",nil},
+						{boss_reflection,"set_held_state",nil})
+					:and_then_sequence(
+				-- conjure flowers together
+					function()
 						boss_reflection:promise_sequence(
 							"return_to_ready_position",
 							32,
 							"conjure_flowers",
 							"return_to_ready_position")
-						return self:promise_sequence(
-							"conjure_flowers",
-							25,
-							"conjure_flowers",
-							"return_to_ready_position")
-					end)
-					:and_then(function()
+					end,
+					"conjure_flowers",
+					25,
+					"conjure_flowers",
+					"return_to_ready_position",
+				-- shoot lasers + throw cards together
+					function()
 						boss_reflection:promise_sequence(
 							"shoot_lasers",
 							"return_to_ready_position")
-						return self:promise_sequence(
-							"throw_cards",
-							"return_to_ready_position",
-							100)
-					end)
-					:and_then(function()
+					end,
+					"throw_cards",
+					"return_to_ready_position",
+					100,
+				-- throw coins together
+					function()
 						boss_reflection:promise_sequence(
 							"throw_coins",
 							"return_to_ready_position")
-						return self:promise_sequence(
-							"throw_coins",
-							"return_to_ready_position",
-							100)
-					end)
+					end,
+					"throw_coins",
+					"return_to_ready_position",
+					100)
 			end
 			return promise
 				:and_then(function()
@@ -731,6 +734,7 @@ local entity_classes={
 					50,
 					{lh,"appear"},
 					30,
+				-- shake finger
 					{"set_pose",4},
 					6,
 					{"set_pose",5},
@@ -741,10 +745,12 @@ local entity_classes={
 					6,
 					{"set_pose",4},
 					10,
+				-- grab handle
 					{self.right_hand,"appear"},
 					15,
 					"grab_mirror_handle",
 					5,
+				-- show face
 					{self,"set_expression"},
 					33,
 					{"set_expression",6},
@@ -771,18 +777,46 @@ local entity_classes={
 						self.is_wearing_top_hat=true
 					end,
 					{"poof",0,-10},
-					30)
+					30,
+					spawn_magic_tile)
 			elseif boss_health.phase==2 then
 				return self:promise_sequence(
 					{"return_to_ready_position",2},
 					30,
-					{"set_all_idle",false},
+					"set_all_idle",
 					10,
+				-- pound fists
 					{"pound",0},
 					{"pound",0},
 					{"pound",3},
-					"conjure_bouquet",
-					"return_to_ready_position",
+				-- the bouquet appears!
+					{"set_expression",1},
+					function()
+						lh.is_holding_bouquet=true
+						spawn_petals(lh.x,lh.y-6,4,8)
+					end,
+					{self.right_hand,"set_pose"},
+					{"move",20,-10,10,ease_in,{0,-5,-5,0},true},
+					35,
+				-- sniff the flowers
+					{lh,"move",self.x-2,self.y+11,20,ease_in},
+					{self,"set_expression",3},
+					30,
+					{self,"set_expression",1},
+					15,
+				-- they vanish
+					function()
+						lh:promise_sequence(
+							10,
+							"set_pose",
+							function()
+								lh.is_holding_bouquet=false
+							end,
+							{"move",-18,6,20,ease_in,nil,true})
+					end,
+					{self.right_hand,"move",0,10,20,ease_out_in,{-25,-20,-25,0},true},
+					15,
+					{self,"return_to_ready_position"},
 					spawn_magic_tile)
 			elseif boss_health.phase==3 then
 				return self:promise_sequence(
@@ -800,12 +834,9 @@ local entity_classes={
 					end,
 					spawn_magic_tile,
 					{"return_to_ready_position",1,"left"})
-			else
-				spawn_magic_tile(140)
-				return self:promise(10)
 			end
 		end,
-		cancel_everything=function(self) -- minified
+		cancel_everything=function(self)
 			self.left_hand:cancel_everything()
 			self.right_hand:cancel_everything()
 			self:cancel_promises()
@@ -821,14 +852,13 @@ local entity_classes={
 				{self.right_hand,"pound",-offset})
 		end,
 		reel=function(self)
-			local promise=self:promise_sequence(
+			local promise,i=self:promise_sequence(
 				{"set_expression",8},
-				{"set_all_idle",false})
+				"set_all_idle")
 				:and_then_parallel(
 					self.left_hand:promise_sequence("set_pose","appear"),
 					self.right_hand:promise_sequence("set_pose","appear")
 				)
-			local i
 			for i=1,8 do
 				promise=promise:and_then_sequence(
 					function()
@@ -844,32 +874,7 @@ local entity_classes={
 				"set_expression",
 				20)
 		end,
-		conjure_bouquet=function(self)
-			-- spawn_entity("bouquet",self.left_hand.x,self.left_hand.y)
-			self.left_hand.is_holding_bouquet=true
-			spawn_petals(self.left_hand.x,self.left_hand.y-6,4,8)
-			local promise=self:promise_sequence(
-				{"set_expression",1},
-				{self.right_hand,"set_pose"},
-				{"move",20,-10,10,ease_in,{0,-5,-5,0},true},
-				35,
-				{self.left_hand,"move",self.x-2,self.y+11,20,ease_in},
-				{self,"set_expression",3},
-				30,
-				{self,"set_expression",1},
-				15)
-			promise:and_then_sequence(
-				10,
-				function()
-					self.left_hand.is_holding_bouquet=false
-					self.left_hand:set_pose()
-					self.left_hand:move(-18,6,20,ease_in,nil,true)
-				end)
-			return promise:and_then_sequence(
-				{self.right_hand,"move",0,10,20,ease_out_in,{-25,-20,-25,0},true},
-				15)
-		end,
-		conjure_flowers=function(self) -- minified
+		conjure_flowers=function(self)
 			-- generate a list of flower locations
 			local locations,i={},1
 			while i<40 do
@@ -911,7 +916,7 @@ local entity_classes={
 				{self,"set_expression",3},
 				30)
 		end,
-		cast_reflection=function(self,upgraded_version) -- minified
+		cast_reflection=function(self,upgraded_version)
 			local lh,rh,i=self.left_hand,self.right_hand
 			-- concentrate
 			local promise=self:promise_sequence(
@@ -961,7 +966,7 @@ local entity_classes={
 			-- cooldown
 				55)
 		end,
-		throw_cards=function(self,heart_row,hand) -- minified
+		throw_cards=function(self,heart_row,hand)
 			heart_row=heart_row or rnd_int(1,5)
 			local promises={}
 			if hand!="right" then
@@ -972,7 +977,7 @@ local entity_classes={
 			end
 			return self:promise_parallel(unpack(promises))
 		end,
-		throw_coins=function(self,target) -- minified
+		throw_coins=function(self,target)
 			local promise,i=self.right_hand:promise("move_to_temple")
 			for i=1,3 do
 				promise=promise:and_then_sequence(
@@ -989,8 +994,8 @@ local entity_classes={
 			end
 			return promise
 		end,
-		shoot_lasers=function(self) -- minified
-			self.left_hand:disapper()
+		shoot_lasers=function(self)
+			self.left_hand:disappear()
 			local promise=self:promise_sequence(
 				{"set_held_state","right"},
 				"set_expression",
@@ -1026,7 +1031,7 @@ local entity_classes={
 			end
 			return promise
 		end,
-		return_to_ready_position=function(self,expression,held_hand) -- minified
+		return_to_ready_position=function(self,expression,held_hand)
 			local lh,rh,home_x,home_y=self.left_hand,self.right_hand,self.home_x,self.home_y
 			lh.is_holding_wand,rh.is_holding_wand=false,false
 			-- reset to a default expression/pose
@@ -1051,7 +1056,7 @@ local entity_classes={
 					{rh,"appear"})
 				:and_then(self,"set_held_state",held_hand)
 		end,
-		set_held_state=function(self,held_hand) -- minified
+		set_held_state=function(self,held_hand)
 			local promises,primary,secondary={},self.left_hand,self.right_hand
 			if held_hand=="right" or (held_hand=="either" and secondary.is_holding_mirror) then
 				primary,secondary=secondary,primary
@@ -1068,7 +1073,7 @@ local entity_classes={
 			end
 			return self:promise_parallel(unpack(promises))
 		end,
-		despawn_coins=function(self) -- minified
+		despawn_coins=function(self)
 			local coin
 			for coin in all(self.coins) do
 				coin:die()
@@ -1076,15 +1081,10 @@ local entity_classes={
 			self.coins={}
 			return 10
 		end,
-		set_idle=function(self,idle)
-			self.is_idle=idle
-		end,
 		set_all_idle=function(self,idle)
-			self:set_idle(idle)
-			self.left_hand:set_idle(idle)
-			self.right_hand:set_idle(idle)
+			self.is_idle,self.left_hand.is_idle,self.right_hand.is_idle=idle,idle,idle
 		end,
-		set_expression=function(self,expression) -- minified
+		set_expression=function(self,expression)
 			self.expression=expression or 5
 		end,
 	},
@@ -1157,11 +1157,13 @@ local entity_classes={
 			self.pose,self.x,self.y,self.visible=hand.pose,hand.x,hand.y,hand.visible
 		end,
 		-- highest-level commands
-		throw_cards=function(self,heart_row) -- minified
+		throw_cards=function(self,heart_row)
 			local dir,r=self.dir
 			local promise=self:promise_sequence(
 				8-dir*8,
-				"set_idle")
+				function()
+					self.is_idle=false
+				end)
 			for r=ternary(self.is_right_hand,1,2),5,2 do
 				promise=promise:and_then_sequence(
 					-- move to the correct row
@@ -1184,7 +1186,7 @@ local entity_classes={
 			end
 			return promise
 		end,
-		flourish_wand=function(self) -- minified
+		flourish_wand=function(self)
 			return self:promise_sequence(
 				{"move",40+20*self.dir,-30,12,ease_out,{-20,20,0,20}},
 				{"set_pose",6},
@@ -1193,7 +1195,7 @@ local entity_classes={
 					freeze_and_shake_screen(0,20)
 				end)
 		end,
-		grab_mirror_handle=function(self) -- minified
+		grab_mirror_handle=function(self)
 			return self:promise_sequence(
 				"set_pose",
 				{"move",self.mirror.x+2*self.dir,self.mirror.y+13,10,ease_out,{10*self.dir,5,0,20}},
@@ -1207,10 +1209,7 @@ local entity_classes={
 			self:cancel_move()
 			self.is_holding_wand,self.is_holding_mirror=false -- ,nil
 		end,
-		set_idle=function(self,idle)
-			self.is_idle=idle
-		end,
-		release_mirror=function(self) -- minified
+		release_mirror=function(self)
 			self.is_holding_mirror=false
 			return self:promise_sequence(
 				"set_pose",
@@ -1222,26 +1221,30 @@ local entity_classes={
 				return self:poof()
 			end
 		end,
-		disapper=function(self)
+		disappear=function(self)
 			self.visible=false
 			return self:poof()
 		end,
 		pound=function(self,offset)
+			local mirror=self.mirror
 			return self:promise_sequence(
 				{"set_pose",2},
-				{"move",self.mirror.x+20*self.dir,self.mirror.y+20,10,ease_in}, -- move out
-				{"move",self.mirror.x+ternary(offset==0,4,0)*self.dir,self.mirror.y+20+offset,5,ease_out}, -- move in
+			-- move out
+				{"move",mirror.x+20*self.dir,mirror.y+20,10,ease_in},
+			-- move in
+				{"move",mirror.x+ternary(offset==0,4,0)*self.dir,mirror.y+20+offset,5,ease_out},
+			-- pound!
 				function()
 					freeze_and_shake_screen(0,2)
 				end,
 				1)
 		end,
-		move_to_temple=function(self) -- minified
+		move_to_temple=function(self)
 			return self:promise_sequence(
 				{"set_pose",1},
 				{"move",self.mirror.x+13*self.dir,self.mirror.y,20})
 		end,
-		set_pose=function(self,pose) -- minified
+		set_pose=function(self,pose)
 			if not self.is_holding_mirror then
 				self.pose=pose or 3
 			end
