@@ -34,10 +34,6 @@ todo:
 	perhaps only 6 columns? only 4 rows?
 	get rid of the spritesheet blocking, will save some tokens on palt calls
 
-7686 tokens before minifying the boss
-3138 tokens spent on magic_mirror and magic_mirror_hand
-2400 of those are the promise type stuff
-
 ]]
 
 -- useful noop function
@@ -328,6 +324,9 @@ local entity_classes={
 				self.hearts-=1
 				self.anim,self.anim_frames="lose",20
 			end
+			if self.hearts<=0 then
+				freeze_and_shake_screen(999,0)
+			end
 			if not self.visible then
 				self.visible=true
 				freeze_and_shake_screen(9,0)
@@ -340,30 +339,44 @@ local entity_classes={
 		-- visible=false,
 		health=0,
 		phase=0,
-		visible_health=0,
 		rainbow_frames=0,
 		is_user_interface=true,
+		drain_frames=0,
 		update=function(self)
 			decrement_counter_prop(self,"rainbow_frames")
-			if self.health>=60 then
-				self.visible_health=60
-			elseif self.visible_health<self.health then
-				self.visible_health+=1
-			elseif self.visible_health>self.health then
-				self.visible_health-=1
+			if self.drain_frames>0 then
+				self.health-=1
 			end
+			decrement_counter_prop(self,"drain_frames")
 		end,
 		draw=function(self)
 			if self.visible then
 				rect(33,2,93,8,ternary(self.rainbow_frames>0,rainbow_color,5))
-				rectfill(33,2,mid(33,32+self.visible_health,92),8)
+				rectfill(33,2,mid(33,32+self.health,92),8)
 			end
 		end,
 		gain_health=function(self)
-			-- 6 to start -> 10 hp per
-			-- 8 after that -> 8 hp per
-			self.health=mid(0,self.health+ternary(one_hit_ko,60,ternary(self.phase<1,10,8)),60)
-			self.rainbow_frames=15+(self.health-self.visible_health)
+			self.health,self.visible,self.rainbow_frames=mid(0,self.health+1,60),true,15
+			local health=self.health
+			if self.phase==0 then
+				if health==31 then
+					boss=spawn_entity("magic_mirror")
+				elseif health==41 then
+					boss.visible=true
+				elseif health==60 then
+					boss:promise_sequence(
+						"phase_change",
+						{"return_to_ready_position",nil,"right"},
+						"decide_next_action")
+				end
+			elseif health>=60 then
+				boss:promise_sequence(
+					"cancel_everything",
+					"reel",
+					"phase_change",
+					{"return_to_ready_position",2},
+					"decide_next_action")
+			end
 		end
 	},
 	magic_tile_spawn={
@@ -386,7 +399,7 @@ local entity_classes={
 		update=function(self)
 			if get_tile_occupant(self:col(),self:row()) then
 				self:die()
-				spawn_magic_tile()
+				spawn_magic_tile(10)
 			end
 		end,
 		draw=function(self)
@@ -404,11 +417,22 @@ local entity_classes={
 			rect(x-2,y-1,x+2,y+1)
 		end,
 		on_hurt=function(self)
-			freeze_and_shake_screen(2,6)
+			freeze_and_shake_screen(2,2)
 			self.hurtbox_channel,self.frames_to_death=0,6
-			spawn_particle_burst(self.x,self.y,30,16,10)
-			boss_health:gain_health()
-			on_magic_tile_picked_up(self)
+			local particles,i=spawn_particle_burst(self.x,self.y,30,16,10)
+			for i=1,ternary(boss_health.phase==0,10,8) do
+				-- shuffle
+				local j=rnd_int(i,#particles)
+				particles[i],particles[j]=particles[j],particles[i]
+				-- move towards and fill the boss bar
+				particles[i].frames_to_death,particles[i].on_death=15+i,function()
+					boss_health:gain_health()
+				end
+				particles[i]:promise_sequence(
+					7+i,
+					{"move",8+min(boss_health.health+i,60),-58,8,ease_out})
+			end
+			on_magic_tile_picked_up(self,10)
 		end
 	},
 	player_reflection={
@@ -707,16 +731,17 @@ local entity_classes={
 					end,
 					"throw_cards",
 					"return_to_ready_position",
-					100,
+					100)
 				-- throw coins together
-					function()
-						boss_reflection:promise_sequence(
-							"throw_coins",
-							"return_to_ready_position")
-					end,
+					:and_then_parallel(
+						"despawn_coins",
+						{boss_reflection,"despawn_coins"})
+					:and_then_sequence(
 					"throw_coins",
 					"return_to_ready_position",
-					100)
+					{boss_reflection,"throw_coins",player_reflection},
+					"return_to_ready_position",
+					{self,100})
 			end
 			return promise
 				:and_then(function()
@@ -728,7 +753,6 @@ local entity_classes={
 		phase_change=function(self)
 			local lh=self.left_hand
 			boss_health.phase+=1
-			boss_health.health=0
 			if boss_health.phase==1 then
 				return self:promise_sequence(
 					50,
@@ -799,7 +823,7 @@ local entity_classes={
 					{"move",20,-10,10,ease_in,{0,-5,-5,0},true},
 					35,
 				-- sniff the flowers
-					{lh,"move",self.x-2,self.y+11,20,ease_in},
+					{lh,"move",-2,-12,20,ease_in,nil,true},
 					{self,"set_expression",3},
 					30,
 					{self,"set_expression",1},
@@ -1505,18 +1529,19 @@ end
 
 -- particle functions
 function spawn_particle_burst(x,y,num_particles,color,speed)
-	local i
+	local particles,i={}
 	for i=1,num_particles do
 		local angle,particle_speed=(i+rnd(0.7))/num_particles,speed*rnd_num(0.5,1.2)
-		spawn_entity("particle",x,y,{
+		add(particles,spawn_entity("particle",x,y,{
 			vx=particle_speed*cos(angle),
 			vy=particle_speed*sin(angle)-speed/2,
 			color=color,
 			gravity=0.1,
 			friction=0.75,
 			frames_to_death=rnd_int(13,19)
-		})
+		}))
 	end
+	return particles
 end
 
 function spawn_petals(x,y,num_petals,color)
@@ -1535,36 +1560,18 @@ end
 
 -- magic tile functions
 function spawn_magic_tile(frames_to_death)
+	if boss_health.health>=60 then
+		boss_health.drain_frames=60
+	end
 	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{
-		frames_to_death=frames_to_death or 10
+		frames_to_death=frames_to_death or 100
 	})
 end
 
-function on_magic_tile_picked_up(tile)
-	local phase,health=boss_health.phase,boss_health.health
+function on_magic_tile_picked_up(tile,health)
+	health+=boss_health.health
 	if health<60 then
-		spawn_magic_tile(ternary(phase<1,80,120)-min(tile.frames_alive,30)) -- 30 frame grace period
-	end
-	if phase==0 then
-		if health==20 then
-			boss_health.visible=true
-		elseif health==40 then
-			boss=spawn_entity("magic_mirror")
-		elseif health==50 then
-			boss.visible=true
-		elseif health==60 then
-			boss:promise_sequence(
-				"phase_change",
-				{"return_to_ready_position",nil,"right"},
-				"decide_next_action")
-		end
-	elseif phase>0 and health>=60 then
-		boss:promise_sequence(
-			"cancel_everything",
-			"reel",
-			"phase_change",
-			{"return_to_ready_position",2},
-			"decide_next_action")
+		spawn_magic_tile(ternary(boss_health.phase<1,80,120)-min(tile.frames_alive,30)) -- 30 frame grace period
 	end
 end
 
