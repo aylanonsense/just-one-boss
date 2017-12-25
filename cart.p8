@@ -16,13 +16,18 @@ coordinates:
            c=1   c=2
 
 todo:
-	boss death animation
-	boss_reflection is more properly mirrored
-	screens: title, death, victory
+	boss death animation - bunnies
+	victory screen with high scores
+	proper death screen that takes you back to title screne
+	proper reset of game after dying
+	playing the game twice skips the intro
+	keep track of high scores
 	sound effects + music
-	hard mode?
-	perhaps only 6 columns? only 4 rows?
+	hard mode
 	get rid of the spritesheet blocking, will save some tokens on palt calls
+	tweak gameplay
+
+496 tokens left!
 ]]
 
 -- useful noop function
@@ -30,6 +35,7 @@ function noop() end
 
 -- global config vars
 local speed_mode=false
+local skip_intro=false
 
 -- global scene vars
 local scene_frame
@@ -50,9 +56,11 @@ local promises={}
 -- global entity vars
 local entities
 local new_entities
+local title_screen
 local player
 local player_health
 local player_reflection
+local player_figment
 local boss
 local boss_health
 local boss_reflection
@@ -70,6 +78,10 @@ local entity_classes={
 		dir=1,
 		update=function(self)
 			decrement_counter_prop(self,"anim_frames")
+			if speed_mode then
+				decrement_counter_prop(self,"anim_frames")
+				decrement_counter_prop(self,"anim_frames")
+			end
 			self.percent_closed=100*ease_out_in(self.anim_frames/100)
 			if self.anim!="open" then
 				self.percent_closed=100-self.percent_closed
@@ -84,10 +96,10 @@ local entity_classes={
 			end
 		end,
 		open=function(self)
-			self.anim,self.anim_frames="open",ternary(speed_mode,0,100)
+			self.anim,self.anim_frames="open",100
 		end,
 		close=function(self)
-			self.anim,self.anim_frames="close",ternary(speed_mode,0,100)
+			self.anim,self.anim_frames="close",100
 		end
 	},
 	title_screen={
@@ -95,17 +107,25 @@ local entity_classes={
 		x=40,
 		y=26,
 		is_user_interface=true,
+		is_pause_immune=true,
 		render_layer=15,
 		update=function(self)
 			if btnp(1) and not self.is_activated then
 				self.is_activated=true
 				self.x+=2
-				self:move(-200,26,ternary(speed_mode,30,100),ease_in_out,{70,0,0,0})
+				self:move(-127,0,ternary(speed_mode,30,100),ease_in_out,{70,0,0,0},true)
 				left_curtain:promise_sequence(ternary(speed_mode,15,27),"open")
 				right_curtain:promise_sequence(ternary(speed_mode,15,27),"open")
 					:and_then(function()
-						player=spawn_entity("player")
-						spawn_magic_tile(ternary(speed_mode,10,210))
+						entities,new_entities,boss_phase,score,score_mult,is_paused={title_screen,left_curtain,right_curtain},{},0,0,1 -- ,false
+						player,player_health,boss_health=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health")
+						if skip_intro then
+							boss=spawn_entity("magic_mirror")
+							boss.visible,boss_health.visible=true,true
+							boss:promise_sequence(30,"intro")
+						else
+							spawn_magic_tile(ternary(speed_mode,10,210))
+						end
 					end)
 			end
 			self:apply_move()
@@ -114,8 +134,34 @@ local entity_classes={
 			palt2(3)
 			sspr2(0,71,47,16,self.x,self.y)
 			sspr2(0,88,47,40,self.x,self.y+18)
-			if self.frames_alive%30<20 and not self.is_activated then
+			if self.frames_alive%30<22 and not self.is_activated then
 				print("press ‘ to begin",self.x-10,self.y+73,13)
+			end
+		end
+	},
+	death_prompt={
+		is_user_interface=true,
+		render_layer=17,
+		is_pause_immune=true,
+		update=function(self)
+			if self.frames_alive>120 and btnp(0) then
+				self:die()
+				local movables,movable={player_figment,player_health,title_screen}
+				for movable in all(movables) do
+					movable:move(127,0,ternary(speed_mode,30,100),ease_in_out,{-70,0,0,0},true)
+					movable.x-=2
+				end
+				title_screen:promise_sequence(
+					ternary(speed_mode,40,110),
+					function()
+						skip_intro,title_screen.is_activated=true -- ,false
+					end)
+			end
+		end,
+		draw=function(self)
+			if self.frames_alive>120 and self.frames_alive%30<22 then
+				print("press ‹ to return",29,99,13)
+				print("to menu",49,106)
 			end
 		end
 	},
@@ -376,18 +422,18 @@ local entity_classes={
 				self.anim,self.anim_frames="lose",20
 			end
 			if self.hearts<=0 then
-				promises={}
-				is_paused=true
+				promises,is_paused,player_health.render_layer={},true,16
 				freeze_and_shake_screen(30,0)
-				player:die()
-				spawn_entity("player_figment",player.x+23,player.y+65)
-					:promise("move",63,72,60,linear)
+				spawn_entity("death_prompt")
+				player_figment=spawn_entity("player_figment",player.x+23,player.y+65)
+				player_figment:promise("move",63,72,60,linear)
 				left_curtain:close()
 				right_curtain:close()
-				player_health.render_layer=16
 				player_health:promise_sequence(
 					30,
 					{"move",63,45,60,ease_in_out,{-60,10,-40,10}})
+				player:die()
+				player=nil
 			end
 		end
 	},
@@ -422,15 +468,7 @@ local entity_classes={
 					elseif health==37 then
 						boss.visible=true
 					elseif health==60 then
-						boss:promise_sequence(
-							"phase_change",
-							spawn_magic_tile,
-							function()
-								boss_phase+=1
-								player_health.visible=true
-							end,
-							{"return_to_ready_position",nil,"right"},
-							"decide_next_action")
+						boss:intro()
 					end
 				elseif health>=60 then
 					if boss_phase>=5 then
@@ -783,6 +821,17 @@ local entity_classes={
 			end
 		end,
 		-- highest-level commands
+		intro=function(self)
+			self:promise_sequence(
+				"phase_change",
+				spawn_magic_tile,
+				function()
+					boss_phase+=1
+					player_health.visible=true
+				end,
+				{"return_to_ready_position",nil,"right"},
+				"decide_next_action")
+		end,
 		decide_next_action=function(self)
 			local promise=self:promise(1)
 			if boss_phase==1 then
@@ -1501,9 +1550,7 @@ function init_game()
 	boss_phase=0
 	-- create starting entities
 	-- player_health,player,player_reflection=spawn_entity("player_health"),spawn_entity("player",35,20) -- ,nil
-	player_health=spawn_entity("player_health")
-	boss_health=spawn_entity("boss_health")
-	spawn_entity("title_screen")
+	title_screen=spawn_entity("title_screen")
 	left_curtain=spawn_entity("curtain",1)
 	right_curtain=spawn_entity("curtain",125,0,{dir=-1})
 	-- boss_health,boss,boss_reflection=spawn_entity("boss_health") -- ,nil,nil
