@@ -16,12 +16,16 @@ coordinates:
            c=1   c=2
 
 todo:
-	victory screen with high scores
-	keep track of high scores
 	sound effects + music
+	timer
+	track high score
+	unlock hard mode
 	hard mode
-	tweak gameplay
-	lots of playtesting
+	victory screen
+	gameplay tweaks
+		maybe hearts just come at the end of each phase?
+	playtesting
+	credits
 
 tokens:
 	entity classes		6240
@@ -33,37 +37,17 @@ tokens:
 function noop() end
 
 -- global debug vars
-local speed_mode=true
-local skip_animations=true
-local one_hit_ko=true
-local one_hit_death=false
-local starting_phase=4
+local starting_phase,skip_animations,one_hit_ko,one_hit_death=4,true -- ,false,false
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,is_paused=0,0,0 -- ,false
 
 -- global game vars
-local boss_phase=0
-local rainbow_color,dark_rainbow_color=8,2
-local score=0
-local score_mult=1
-
--- global promise vars
-local promises={}
+local rainbow_color,dark_rainbow_color,boss_phase,score,score_mult=8,2,0,0,1
 
 -- global entity vars
-local entities={}
-local new_entities={}
-local title_screen
-local player
-local player_health
-local player_reflection
-local player_figment
-local boss
-local boss_health
-local boss_reflection
-local left_curtain
-local right_curtain
+local promises,entities,new_entities={},{},{}
+local title_screen,player,player_health,player_reflection,player_figment,boss,boss_health,boss_reflection,curtains
 
 -- global entities classes
 local entity_classes={
@@ -71,11 +55,11 @@ local entity_classes={
 		update=function(self)
 			if self.frames_alive%15==0 then
 				self:poof()
-				spawn_entity("bunny",self.x,self.y,{vx=ternary(rnd()<0.5,1,-1)*(1+rnd(2)),vy=-1-rnd(2)})
+				spawn_entity("bunny",self,nil,{vx=ternary(rnd()<0.5,1,-1)*(1+rnd(2)),vy=-1-rnd(2)})
 			end
 		end,
-		draw=function(self)
-			sspr2(100,9,15,12,self.x-8,self.y-1)
+		draw=function(self,x,y)
+			sspr2(100,9,15,12,x-8,y-1)
 		end
 	},
 	bunny={
@@ -83,14 +67,13 @@ local entity_classes={
 		update=function(self)
 			self.vy+=0.1
 		end,
-		draw=function(self)
-			sspr2(47,71,14,13,self.x-7,self.y-7,self.vx>0)
+		draw=function(self,x,y)
+			sspr2(47,71,14,13,x-7,y-7,self.vx>0)
 		end
 	},
-	curtain={
+	curtains={
 		is_pause_immune=true,
 		render_layer=14,
-		is_user_interface=true,
 		percent_closed=100,
 		anim_frames=0,
 		dir=1,
@@ -102,35 +85,35 @@ local entity_classes={
 			end
 		end,
 		draw=function(self)
-			rectfill(self.x-10*self.dir,0,self.x+self.dir*.62*self.percent_closed,127,0)
-			local lines,i={0,94,5,70,11,34,21,20}
+			self:draw_curtain(1,1)
+			self:draw_curtain(125,-1)
+		end,
+		draw_curtain=function(self,x,dir)
+			rectfill(x-10*dir,0,x+dir*.62*self.percent_closed,127,0)
+			local lines={0,94,5,70,11,34,21,20}
+			local i
 			for i=1,#lines,2 do
-				local x=self.x+0.5+self.dir*(self.percent_closed/10+(1+self.percent_closed/100)*lines[i])
-				line(x,11,x,lines[i+1],2)
+				local line_x=x+0.5+dir*(self.percent_closed/10+(1+self.percent_closed/100)*lines[i])
+				line(line_x,11,line_x,lines[i+1],2)
 			end
 		end,
-		open=function(self)
-			self.anim,self.anim_frames="open",ternary(speed_mode,1,100)
-		end,
-		close=function(self)
-			self.anim,self.anim_frames="close",ternary(speed_mode,1,100)
+		set_anim=function(self,anim)
+			self.anim,self.anim_frames=anim,100
 		end
 	},
 	title_screen={
 		x=40,
 		y=26,
-		is_user_interface=true,
 		is_pause_immune=true,
 		render_layer=15,
 		update=function(self)
 			if btnp(1) and not self.is_activated then
 				self.is_activated=true
 				self.x+=2
-				self:move(-127,0,ternary(speed_mode,30,100),ease_in_out,{70,0,0,0},true)
-				left_curtain:promise_sequence(ternary(speed_mode,15,27),"open")
-				right_curtain:promise_sequence(ternary(speed_mode,15,27),"open")
+				self:move(-127,0,100,ease_in_out,{70,0,0,0},true)
+				curtains:promise_sequence(27,{"set_anim","open"})
 					:and_then(function()
-						entities,new_entities,boss_phase,score,score_mult,is_paused={title_screen,left_curtain,right_curtain},{},max(0,starting_phase-1),0,1 -- ,false
+						entities,new_entities,boss_phase,score,score_mult,is_paused={title_screen,curtains},{},max(0,starting_phase-1),0,1 -- ,false
 						player,player_health,boss_health=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health")
 						player_reflection,player_figment,boss,boss_reflection=nil -- ,nil,...
 						if starting_phase>0 then
@@ -144,43 +127,40 @@ local entity_classes={
 								player_reflection=spawn_entity("player_reflection")
 							end
 						else
-							spawn_magic_tile(ternary(speed_mode,10,210))
+							spawn_magic_tile(210)
 						end
 					end)
 			end
 		end,
-		draw=function(self)
-			sspr2(0,71,47,16,self.x,self.y)
-			sspr2(0,88,47,40,self.x,self.y+18)
-			if self.frames_alive%30<22 and not self.is_activated then
-				print("press    to begin",self.x-10,self.y+73,13)
-				sspr2(88,12,8,7,self.x+14,self.y+72)
+		draw=function(self,x,y,f)
+			sspr2(0,71,47,16,x,y)
+			sspr2(0,88,47,40,x,y+18)
+			if f%30<22 and not self.is_activated then
+				print("press    to begin",x-10,y+73,13)
+				sspr2(88,12,8,7,x+14,y+72)
 			end
 		end
 	},
 	victory_screen={
-		is_user_interface=true,
 		render_layer=18,
 		x=63,
-		draw=function(self)
-			local x=self.x
+		draw=function(self,x)
 			sspr2(47,102,81,26,x-40,15)
 			print("you did it!",x-21,41,15)
 			print("you beautiful",x-25,49)
 			print("person, you!",x-23,57)
 			-- print score
-			self:draw_score("score:","27100","5:45",73)
+			self:draw_score(x,73,"score:","27100","5:45")
 			-- print best
-			self:draw_score("best:","27100","5:45",81)
+			self:draw_score(x,81,"best:","27100","5:45")
 		end,
-		draw_score=function(self,label_text,score_text,time_text,y)
-			print(label_text,self.x-42,y,7)
-			print(score_text,self.x+6-4*#score_text,y)
-			print(time_text,self.x+30-4*#time_text,y)
+		draw_score=function(self,x,y,label_text,score_text,time_text)
+			print(label_text,x-42,y,7)
+			print(score_text,x+6-4*#score_text,y)
+			print(time_text,x+30-4*#time_text,y)
 		end
 	},
 	death_prompt={
-		is_user_interface=true,
 		render_layer=17,
 		is_pause_immune=true,
 		update=function(self)
@@ -188,11 +168,11 @@ local entity_classes={
 				self:die()
 				local movables,movable={player_figment,player_health,title_screen}
 				for movable in all(movables) do
-					movable:move(127,0,ternary(speed_mode,30,100),ease_in_out,{-70,0,0,0},true)
+					movable:move(127,0,100,ease_in_out,{-70,0,0,0},true)
 					movable.x-=2
 				end
 				title_screen:promise_sequence(
-					ternary(speed_mode,40,110),
+					110,
 					function()
 						starting_phase,title_screen.is_activated=1 -- ,false
 					end)
@@ -208,13 +188,12 @@ local entity_classes={
 	},
 	player_figment={
 		is_pause_immune=true,
-		is_user_interface=true,
 		render_layer=17,
-		draw=function(self)
-			if self.frames_alive<120 then
-				sspr2(88,4,9,8,self.x-4,self.y-6)
+		draw=function(self,x,y,f)
+			if f<120 then
+				sspr2(88,4,9,8,x-4,y-6)
 			else
-				sspr2(88,0,13,4,self.x-6,self.y-4)
+				sspr2(88,0,13,4,x-6,y-4)
 			end
 		end
 	},
@@ -266,7 +245,7 @@ local entity_classes={
 			end
 			return false
 		end,
-		draw=function(self)
+		draw=function(self,x,y)
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
 				local sx,sy,sh,dx,dy,facing,flipped=0,0,8,3+4*self.facing,6,self.facing,self.facing==0
 				-- up/down sprites are below the left/right sprites in the spritesheet
@@ -305,7 +284,7 @@ local entity_classes={
 				pal(12,self.primary_color)
 				pal(13,self.secondary_color)
 				pal(1,self.tertiary_color)
-				sspr2(sx,sy,11,sh,self.x-dx,self.y-dy,flipped)
+				sspr2(sx,sy,11,sh,x-dx,y-dy,flipped)
 			end
 		end,
 		check_inputs=function(self)
@@ -354,7 +333,7 @@ local entity_classes={
 			end
 		end,
 		on_hurt=function(self)
-			spawn_entity("pain",self.x,self.y)
+			spawn_entity("pain",self)
 			self:get_hurt()
 		end,
 		get_hurt=function(self)
@@ -373,17 +352,17 @@ local entity_classes={
 		hearts=4,
 		-- anim=nil,
 		anim_frames=0,
-		is_user_interface=true,
+		render_layer=13,
 		update=function(self)
 			if decrement_counter_prop(self,"anim_frames") then
 				self.anim=nil
 			end
 		end,
-		draw=function(self)
+		draw=function(self,x,y)
 			if self.visible then
 				local i
 				for i=1,4 do
-					sspr2(0,30,9,7,self.x+8*i-24,self.y-3)
+					sspr2(0,30,9,7,x+8*i-24,y-3)
 					local sprite=0
 					if self.anim=="gain" and i==self.hearts then
 						sprite=mid(1,5-flr(self.anim_frames/2),3)
@@ -393,7 +372,7 @@ local entity_classes={
 						sprite=4
 					end
 					if sprite!=6 or self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
-						sspr2(9*sprite,30,9,7,self.x+8*i-24,self.y-3)
+						sspr2(9*sprite,30,9,7,x+8*i-24,y-3)
 					end
 				end
 			end
@@ -418,8 +397,7 @@ local entity_classes={
 				spawn_entity("death_prompt")
 				player_figment=spawn_entity("player_figment",player.x+23,player.y+65)
 				player_figment:promise("move",63,72,60,linear)
-				left_curtain:close()
-				right_curtain:close()
+				curtains:set_anim("close")
 				player_health:promise_sequence(
 					30,
 					{"move",63,45,60,ease_in_out,{-60,10,-40,10}})
@@ -434,7 +412,7 @@ local entity_classes={
 		-- visible=false,
 		health=0,
 		rainbow_frames=0,
-		is_user_interface=true,
+		render_layer=13,
 		drain_frames=0,
 		update=function(self)
 			decrement_counter_prop(self,"rainbow_frames")
@@ -480,8 +458,7 @@ local entity_classes={
 							"die",
 							120,
 							function()
-								left_curtain:close()
-								right_curtain:close()
+								curtains:set_anim("close")
 							end,
 							100,
 							function()
@@ -517,15 +494,15 @@ local entity_classes={
 	},
 	magic_tile_spawn={
 		frames_to_death=10,
-		draw=function(self)
-			if self.frames_to_death<=10 then
-				local f=self.frames_to_death+3
-				rect(self.x-f-1,self.y-f,self.x+f+1,self.y+f,ternary(self.frames_alive<4,5,6))
+		draw=function(self,x,y,f,f2)
+			if f2<=10 then
+				f2+=3
+				rect(x-f2-1,y-f2,x+f2+1,y+f2,ternary(f<4,5,6))
 			end
 		end,
 		on_death=function(self)
 			freeze_and_shake_screen(0,1)
-			spawn_entity("magic_tile",self.x,self.y)
+			spawn_entity("magic_tile",self)
 			spawn_particle_burst(self.x,self.y,4,16,4)
 		end
 	},
@@ -539,11 +516,11 @@ local entity_classes={
 				spawn_magic_tile(10)
 			end
 		end,
-		draw=function(self)
-			local x,y,tile_color,bg_color=self.x,self.y,rainbow_color,1
-			if self.frames_to_death>0 or self.frames_alive<4 then
+		draw=function(self,x,y,f,f2)
+			local tile_color,bg_color=rainbow_color,1
+			if f2>0 or f<4 then
 				tile_color,bg_color=7,7
-				if self.frames_to_death==mid(1,self.frames_to_death,2) then
+				if f2==mid(1,f2,2) then
 					tile_color,bg_color=6,6
 				end
 			end
@@ -563,11 +540,11 @@ local entity_classes={
 				local j=rnd_int(i,#particles)
 				particles[i],particles[j]=particles[j],particles[i]
 				-- move towards and fill the boss bar
-				particles[i].frames_to_death,particles[i].on_death=15+ternary(speed_mode,0,i),function()
+				particles[i].frames_to_death,particles[i].on_death=15+i,function()
 					boss_health:gain_health()
 				end
 				particles[i]:promise_sequence(
-					7+ternary(speed_mode,0,i),
+					7+i,
 					{"move",8+min(boss_health.health+i,60),-58,8,ease_out})
 			end
 			on_magic_tile_picked_up(self,health_change)
@@ -580,7 +557,7 @@ local entity_classes={
 		tertiary_color=3,
 		init=function(self)
 			self:copy_player()
-			spawn_entity("poof",self.x,self.y)
+			self:poof()
 		end,
 		update=function(self)
 			local prev_col,prev_row=self:col(),self:row()
@@ -597,7 +574,7 @@ local entity_classes={
 			if player then
 				player:get_hurt(entity)
 				self:copy_player()
-				spawn_entity("pain",self.x,self.y)
+				spawn_entity("pain",self)
 			end
 		end,
 		copy_player=function(self)
@@ -617,22 +594,22 @@ local entity_classes={
 		is_boss_generated=true,
 		update=function(self)
 			if self.frames_alive==50 and self.has_heart then
-				spawn_entity("heart",self.x,self.y)
+				spawn_entity("heart",self)
 			end
 		end,
-		draw=function(self)
+		draw=function(self,x,y,f)
 			-- some cards are red
 			if self.has_heart then
 				pal(5,8)
 				pal(6,15)
 			end
 			-- spin counter-clockwise when moving left
-			local f=flr(self.frames_alive/5)%4
+			f=flr(f/5)%4
 			if self.vx<0 then
 				f=(6-f)%4
 			end
 			-- draw the card
-			sspr2(10*f+77,21,10,10,self.x-5,self.y-7)
+			sspr2(10*f+77,21,10,10,x-5,y-7)
 		end
 	},
 	flower_patch={
@@ -644,14 +621,14 @@ local entity_classes={
 				self.hitbox_channel=0
 			end
 		end,
-		draw=function(self)
+		draw=function(self,x,y)
 			local sx=101
 			if self.hit_frames>0 then
 				sx=119
 			elseif self.frames_to_death>0 then
 				sx=110
 			end
-			sspr2(sx,71,9,8,self.x-4,self.y-4)
+			sspr2(sx,71,9,8,x-4,y-4)
 		end,
 		bloom=function(self)
 			self.frames_to_death,self.hit_frames,self.hitbox_channel=ternary(boss_phase==4,10,30),3,1
@@ -679,20 +656,20 @@ local entity_classes={
 					self.hurtbox_channel=4 -- coin
 				end)
 		end,
-		draw=function(self)
-			if self.frames_alive<36 then
-				circfill(self.target_x,self.target_y,min(flr(self.frames_alive/7),4),2)
+		draw=function(self,x,y,f)
+			if f<36 then
+				circfill(self.target_x,self.target_y,min(flr(f/7),4),2)
 			end
 			local sprite=0
-			if self.frames_alive>20 then
+			if f>20 then
 				sprite=2
 			end
-			if self.frames_alive>=30 then
+			if f>=30 then
 				sprite=ternary(self.health<3,5,4)
 			else
-				sprite+=flr(self.frames_alive/3)%2
+				sprite+=flr(f/3)%2
 			end
-			sspr(9*sprite,37,9,9,self.x-4,self.y-5)
+			sspr(9*sprite,37,9,9,x-4,y-5)
 		end,
 		get_bumped=function(self)
 			self.health-=1
@@ -703,7 +680,7 @@ local entity_classes={
 		on_death=function(self)
 			spawn_particle_burst(self.x,self.y,6,6,4)
 			if self.has_heart then
-				spawn_entity("heart",self.x,self.y)
+				spawn_entity("heart",self)
 			end
 		end
 	},
@@ -722,8 +699,8 @@ local entity_classes={
 			self.vy*=self.friction
 			self.prev_x,self.prev_y=self.x,self.y
 		end,
-		draw=function(self)
-			line(self.x,self.y,self.prev_x,self.prev_y,ternary(self.color==16,rainbow_color,self.color))
+		draw=function(self,x,y)
+			line(x,y,self.prev_x,self.prev_y,ternary(self.color==16,rainbow_color,self.color))
 		end
 	},
 	magic_mirror={
@@ -1050,7 +1027,7 @@ local entity_classes={
 					self.left_hand:promise_sequence("set_pose","appear"),
 					self.right_hand:promise_sequence("set_pose","appear")
 				)
-			for i=1,ternary(speed_mode,1,times) do
+			for i=1,times do
 				promise=promise:and_then_sequence(
 					function()
 						freeze_and_shake_screen(0,3)
@@ -1066,7 +1043,7 @@ local entity_classes={
 			-- generate a list of flower locations
 			local locations,i={},0
 			while i<40 do
-				add(locations,{i%8*10+5,8*flr(i/8)+4})
+				add(locations,{x=i%8*10+5,y=8*flr(i/8)+4})
 				i+=rnd_int(1,3)
 			end
 			-- concentrate
@@ -1086,7 +1063,7 @@ local entity_classes={
 						locations[i],locations[j]=locations[j],locations[i]
 						promise=promise:and_then_sequence(
 							function()
-								add(self.flowers,spawn_entity("flower_patch",locations[i][1],locations[i][2]))
+								add(self.flowers,spawn_entity("flower_patch",locations[i]))
 							end,
 							1)
 					end
@@ -1207,7 +1184,7 @@ local entity_classes={
 					{"set_expression",0},
 					function()
 						freeze_and_shake_screen(0,4)
-						spawn_entity("mirror_laser",self.x,self.y)
+						spawn_entity("mirror_laser",self)
 					end,
 					14,
 					-- cooldown
@@ -1285,7 +1262,7 @@ local entity_classes={
 		home_x=20,
 		is_reflection=true,
 		init=function(self)
-			self:super_init()
+			boss.init(self)
 			self.left_hand:copy_hand(boss.left_hand)
 			self.right_hand:copy_hand(boss.right_hand)
 		end
@@ -1440,8 +1417,8 @@ local entity_classes={
 		is_boss_generated=true,
 		render_layer=9,
 		frames_to_death=14,
-		draw=function(self)
-			local x,y=self.x,self.y+4
+		draw=function(self,x,y)
+			y+=4
 			rectfill(x-5,y,x+5,100,14)
 			rectfill(x-4,y,x+4,100,15)
 			rectfill(x-3,y,x+3,100,7)
@@ -1453,13 +1430,12 @@ local entity_classes={
 	heart={
 		frames_to_death=150,
 		hurtbox_channel=2, -- pickup
-		draw=function(self)
-			local f=self.frames_to_death
-			if f>30 or f%4>1 then
-				if (f+4)%30>14 then
+		draw=function(self,x,y,f,f2)
+			if f2>30 or f2%4>1 then
+				if (f2+4)%30>14 then
 					pal(14,8)
 				end
-				sspr2(ternary(f%30<20,36,45),30,9,7,self.x-4,self.y-5-max(0,self.frames_alive-0.09*self.frames_alive*self.frames_alive))
+				sspr2(ternary(f2%30<20,36,45),30,9,7,x-4,y-5-max(0,f-0.09*f*f))
 			end
 		end,
 		on_hurt=function(self)
@@ -1472,30 +1448,30 @@ local entity_classes={
 	poof={
 		frames_to_death=12,
 		render_layer=9,
-		draw=function(self)
-			sspr2(64+16*flr(self.frames_alive/3),31,16,14,self.x-8,self.y-8)
+		draw=function(self,x,y,f)
+			sspr2(64+16*flr(f/3),31,16,14,x-8,y-8)
 		end
 	},
 	pain={
 		is_pause_immune=true,
 		render_layer=12,
 		frames_to_death=5,
-		draw=function(self)
+		draw=function(self,x,y)
 			pal(7,10)
 			if self.frames_to_death<=2 then
 				palt(10,true)
 			end
-			sspr2(105,45,23,26,self.x-11,self.y-16)
+			sspr2(105,45,23,26,x-11,y-16)
 		end
 	},
 	points={
 		render_layer=10,
 		vy=-0.5,
 		frames_to_death=30,
-		draw=function(self)
-			pset(self.x,self.y,8)
+		draw=function(self,x,y)
+			pset(x,y,8)
 			local text="+"..self.points.."00"
-			print(text,self.x-2*#text,self.y,rainbow_color)
+			print(text,x-2*#text,y,rainbow_color)
 		end
 	}
 }
@@ -1503,7 +1479,7 @@ local entity_classes={
 -- primary pico-8 functions (_init, _update, _draw)
 function _init()
 	-- create starting entities
-	title_screen,left_curtain,right_curtain=spawn_entity("title_screen"),spawn_entity("curtain",1),spawn_entity("curtain",125,0,{dir=-1})
+	title_screen,curtains=spawn_entity("title_screen"),spawn_entity("curtains")
 	-- immediately add new entities to the game
 	add_new_entities()
 end
@@ -1512,7 +1488,7 @@ function _update()
 	if freeze_frames>0 then
 		freeze_frames=decrement_counter(freeze_frames)
 		if player then
-			player:check_inputs() -- todo other scenes won't like this
+			player:check_inputs()
 		end
 	else
 		screen_shake_frames,scene_frame=decrement_counter(screen_shake_frames),increment_counter(scene_frame)
@@ -1543,10 +1519,12 @@ function _update()
 		end
 		-- check for hits
 		if not is_paused then
-			for entity in all(entities) do
-				local entity2
-				for entity2 in all(entities) do
-					if entity!=entity2 and band(entity.hitbox_channel,entity2.hurtbox_channel)>0 and entity:is_hitting(entity2) then
+			local i,j
+			-- don't use all() or it may cause slowdown
+			for i=1,#entities do
+				for j=1,#entities do
+					local entity,entity2=entities[i],entities[j]
+					if i!=j and band(entity.hitbox_channel,entity2.hurtbox_channel)>0 and entity:is_hitting(entity2) then
 						entity:on_hit(entity2)
 						if entity2.invincibility_frames<=0 then
 							entity2:on_hurt(entity)
@@ -1606,12 +1584,10 @@ function _draw()
 	sspr2(83,54,4,2,77,-1,true,true)
 	sspr2(83,54,4,2,0,40,false)
 	sspr2(83,54,4,2,77,40,true)
-	pal()
 	-- draw entities
 	foreach(entities,function(entity)
-		if not entity.is_user_interface then
-			entity:draw()
-			pal()
+		if entity.render_layer<13 then
+			entity:draw2()
 		end
 	end)
 	-- draw ui
@@ -1627,11 +1603,9 @@ function _draw()
 	-- -- draw timer
 	-- print("17:03",101,120)
 	-- draw ui entities
-	pal()
 	foreach(entities,function(entity)
-		if entity.is_user_interface then
-			entity:draw()
-			pal()
+		if entity.render_layer>=13 then
+			entity:draw2()
 		end
 	end)
 	-- draw guidelines
@@ -1659,7 +1633,7 @@ end
 function spawn_particle_burst(x,y,num_particles,color,speed)
 	local particles,i={}
 	for i=1,num_particles do
-		local angle,particle_speed=(i+rnd(0.7))/num_particles,speed*rnd_num(0.5,1.2)
+		local angle,particle_speed=(i+rnd(0.7))/num_particles,speed*(0.5+rnd(0.7))
 		add(particles,spawn_entity("particle",x,y,{
 			vx=particle_speed*cos(angle),
 			vy=particle_speed*sin(angle)-speed/2,
@@ -1677,10 +1651,10 @@ function spawn_petals(x,y,num_petals,color)
 	for i=1,num_petals do
 		spawn_entity("particle",x,y-2,{
 			vx=i-0.5-num_petals/2,
-			vy=rnd_num(-2,-1),
+			vy=-1-rnd(),
 			friction=0.9,
 			gravity=0.06,
-			frames_to_death=rnd_int(10,17),
+			frames_to_death=10+rnd(7),
 			color=color
 		})
 	end
@@ -1705,6 +1679,9 @@ end
 
 -- entity functions
 function spawn_entity(class_name,x,y,args,skip_init)
+	if type(x)=="table" then
+		x,y=x.x,x.y
+	end
 	local k,v,entity
 	local super_class_name=entity_classes[class_name].extends
 	if super_class_name then
@@ -1731,6 +1708,10 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			init=noop,
 			update=noop,
 			draw=noop,
+			draw2=function(self)
+				self:draw(self.x,self.y,self.frames_alive,self.frames_to_death)
+				pal()
+			end,
 			die=function(self)
 				if not self.finished then
 					self:on_death()
@@ -1825,9 +1806,6 @@ function spawn_entity(class_name,x,y,args,skip_init)
 	end
 	-- add class properties/methods onto it
 	for k,v in pairs(entity_classes[class_name]) do
-		if super_class_name and type(entity[k])=="function" then
-			entity["super_"..k]=entity[k]
-		end
 		entity[k]=v
 	end
 	entity.class_name=class_name
@@ -1917,8 +1895,10 @@ function make_promise(ctx,fn,...)
 		end,
 		and_then=function(self,ctx,...)
 			local promise
+			-- if the first arg is a table, asusme that's the context
 			if type(ctx)=="table" then
 				promise=make_promise(ctx,...)
+			-- otherwise pass on this promise's context
 			else
 				promise=make_promise(self.ctx,ctx,...)
 			end
@@ -1947,24 +1927,21 @@ function make_promise(ctx,fn,...)
 			return promise
 		end,
 		and_then_parallel=function(self,...)
+			-- could save around 34 tokens for making this method really dumb
 			local overall_promise,promises,num_finished=make_promise(self.ctx),{...},0
 			if #promises==0 then
 				overall_promise:finish()
 			else
 				local parallel_promise
 				foreach(promises,function(parallel_promise)
-					local temp_promise
-					if type(parallel_promise)=="table" then
-						temp_promise=self:and_then(unpack(parallel_promise))
-					else
-						temp_promise=self:and_then(parallel_promise)
-					end
-					temp_promise:and_then(function()
-						num_finished+=1
-						if num_finished==#promises then
-							overall_promise:finish()
-						end
-					end)
+					self:and_then_sequence(
+						parallel_promise,
+						function()
+							num_finished+=1
+							if num_finished==#promises then
+								overall_promise:finish()
+							end
+						end)
 				end)
 			end
 			return overall_promise
@@ -1977,8 +1954,8 @@ function is_rendered_on_top_of(a,b)
 	return ternary(a.render_layer==b.render_layer,a:row()>b:row(),a.render_layer>b.render_layer)
 end
 
-function sspr2(x,y,width,height,x2,y2,flip_horizontal,flip_vertical)
-	sspr(x,y,width,height,x2+0.5,y2+0.5,width,height,flip_horizontal,flip_vertical)
+function sspr2(x,y,width,height,x2,y2,...)
+	sspr(x,y,width,height,x2+0.5,y2+0.5,width,height,...)
 end
 
 function color_wash(c)
@@ -1990,10 +1967,10 @@ end
 
 -- tile functions
 function get_tile_occupant(col,row)
-	local e
-	for e in all(entities) do
-		if e.occupies_tile and e:col()==col and e:row()==row then
-			return e
+	local entity
+	for entity in all(entities) do
+		if entity.occupies_tile and entity:col()==col and entity:row()==row then
+			return entity
 		end
 	end
 end
@@ -2038,17 +2015,9 @@ function rnd_int(min_val,max_val)
 	return flr(min_val+rnd(1+max_val-min_val))
 end
 
--- generates a random number between min_val and max_val
-function rnd_num(min_val,max_val)
-	return min_val+rnd(max_val-min_val)
-end
-
 -- increment a counter, wrapping to 20000 if it risks overflowing
 function increment_counter(n)
-	if n>32000 then
-		return n-12000
-	end
-	return n+1
+	return n+ternary(n>32000,-12000,1)
 end
 
 -- decrement a counter but not below 0
