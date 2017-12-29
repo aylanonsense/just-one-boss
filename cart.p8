@@ -23,7 +23,6 @@ todo:
 	hard mode
 	victory screen
 	gameplay tweaks
-		maybe hearts just come at the end of each phase?
 	playtesting
 	credits
 
@@ -37,7 +36,7 @@ tokens:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_animations,one_hit_ko,one_hit_death=4,true -- ,false,false
+local starting_phase,skip_animations,one_hit_ko,one_hit_death=3,true,true,false
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,is_paused=0,0,0 -- ,false
@@ -52,42 +51,48 @@ local title_screen,player,player_health,player_reflection,player_figment,boss,bo
 -- global entities classes
 local entity_classes={
 	top_hat={
-		update=function(self)
+		-- draw
+		function(self,x,y)
+			sspr2(100,9,15,12,x-8,y-1)
+		end,
+		-- update
+		function(self)
 			if self.frames_alive%15==0 then
 				self:poof()
 				spawn_entity("bunny",self,nil,{vx=ternary(rnd()<0.5,1,-1)*(1+rnd(2)),vy=-1-rnd(2)})
 			end
-		end,
-		draw=function(self,x,y)
-			sspr2(100,9,15,12,x-8,y-1)
 		end
 	},
 	bunny={
-		frames_to_death=100,
-		update=function(self)
+		-- draw
+		function(self,x,y)
+			sspr2(47,71,14,13,x-7,y-7,self.vx>0)
+		end,
+		-- update
+		function(self)
 			self.vy+=0.1
 		end,
-		draw=function(self,x,y)
-			sspr2(47,71,14,13,x-7,y-7,self.vx>0)
-		end
+		frames_to_death=100
 	},
 	curtains={
-		is_pause_immune=true,
-		render_layer=14,
-		percent_closed=100,
-		anim_frames=0,
-		dir=1,
-		update=function(self)
+		-- draw
+		function(self)
+			self:draw_curtain(1,1)
+			self:draw_curtain(125,-1)
+		end,
+		-- update
+		function(self)
 			decrement_counter_prop(self,"anim_frames")
 			self.percent_closed=100*ease_out_in(self.anim_frames/100)
 			if self.anim!="open" then
 				self.percent_closed=100-self.percent_closed
 			end
 		end,
-		draw=function(self)
-			self:draw_curtain(1,1)
-			self:draw_curtain(125,-1)
-		end,
+		is_pause_immune=true,
+		render_layer=14,
+		percent_closed=100,
+		anim_frames=0,
+		dir=1,
 		draw_curtain=function(self,x,dir)
 			rectfill(x-10*dir,0,x+dir*.62*self.percent_closed,127,0)
 			local lines={0,94,5,70,11,34,21,20}
@@ -102,20 +107,27 @@ local entity_classes={
 		end
 	},
 	title_screen={
-		x=40,
-		y=26,
-		is_pause_immune=true,
-		render_layer=15,
-		update=function(self)
+		-- draw
+		function(self,x,y,f)
+			sspr2(0,71,47,16,x,y)
+			sspr2(0,88,47,40,x,y+18)
+			if f%30<22 and not self.is_activated then
+				print("press    to begin",x-10,y+73,13)
+				sspr2(88,12,8,7,x+14,y+72)
+			end
+		end,
+		-- update
+		function(self)
 			if btnp(1) and not self.is_activated then
 				self.is_activated=true
 				self.x+=2
 				self:move(-127,0,100,ease_in_out,{70,0,0,0},true)
-				curtains:promise_sequence(27,{"set_anim","open"})
-					:and_then(function()
+				curtains:promise_sequence(
+					27,
+					{"set_anim","open"},
+					function()
 						entities,new_entities,boss_phase,score,score_mult,is_paused={title_screen,curtains},{},max(0,starting_phase-1),0,1 -- ,false
-						player,player_health,boss_health=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health")
-						player_reflection,player_figment,boss,boss_reflection=nil -- ,nil,...
+						player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health") -- ,nil,...
 						if starting_phase>0 then
 							boss=spawn_entity("magic_mirror")
 							boss.visible,boss_health.visible=true,true
@@ -132,19 +144,14 @@ local entity_classes={
 					end)
 			end
 		end,
-		draw=function(self,x,y,f)
-			sspr2(0,71,47,16,x,y)
-			sspr2(0,88,47,40,x,y+18)
-			if f%30<22 and not self.is_activated then
-				print("press    to begin",x-10,y+73,13)
-				sspr2(88,12,8,7,x+14,y+72)
-			end
-		end
+		x=40,
+		y=26,
+		is_pause_immune=true,
+		render_layer=15
 	},
 	victory_screen={
-		render_layer=18,
-		x=63,
-		draw=function(self,x)
+		-- draw
+		function(self,x)
 			sspr2(47,102,81,26,x-40,15)
 			print("you did it!",x-21,41,15)
 			print("you beautiful",x-25,49)
@@ -154,6 +161,8 @@ local entity_classes={
 			-- print best
 			self:draw_score(x,81,"best:","27100","5:45")
 		end,
+		render_layer=18,
+		x=63,
 		draw_score=function(self,x,y,label_text,score_text,time_text)
 			print(label_text,x-42,y,7)
 			print(score_text,x+6-4*#score_text,y)
@@ -161,9 +170,16 @@ local entity_classes={
 		end
 	},
 	death_prompt={
-		render_layer=17,
-		is_pause_immune=true,
-		update=function(self)
+		-- draw
+		function(self)
+			if self.frames_alive>120 and self.frames_alive%30<22 then
+				print("press    to return",29,99,13)
+				print("to menu",49,107)
+				sspr2(88,12,8,7,52,98,true)
+			end
+		end,
+		-- update
+		function(self)
 			if self.frames_alive>120 and btnp(0) then
 				self:die()
 				local movables,movable={player_figment,player_health,title_screen}
@@ -178,74 +194,24 @@ local entity_classes={
 					end)
 			end
 		end,
-		draw=function(self)
-			if self.frames_alive>120 and self.frames_alive%30<22 then
-				print("press    to return",29,99,13)
-				print("to menu",49,107)
-				sspr2(88,12,8,7,52,98,true)
-			end
-		end
+		render_layer=17,
+		is_pause_immune=true
 	},
 	player_figment={
-		is_pause_immune=true,
-		render_layer=17,
-		draw=function(self,x,y,f)
+		-- draw
+		function(self,x,y,f)
 			if f<120 then
 				sspr2(88,4,9,8,x-4,y-6)
 			else
 				sspr2(88,0,13,4,x-6,y-4)
 			end
-		end
+		end,
+		is_pause_immune=true,
+		render_layer=17
 	},
 	player={
-		hitbox_channel=2, -- pickup
-		hurtbox_channel=1, -- player
-		facing=1, -- 0 = left, 1 = right, 2 = up, 3 = down
-		step_frames=0,
-		teeter_frames=0,
-		bump_frames=0,
-		stun_frames=0,
-		primary_color=12,
-		secondary_color=13,
-		tertiary_color=0,
-		x=35,
-		y=20,
-		update=function(self)
-			decrement_counter_prop(self,"stun_frames")
-			decrement_counter_prop(self,"teeter_frames")
-			decrement_counter_prop(self,"bump_frames")
-			-- try moving
-			self:check_inputs()
-			-- apply moves that were delayed from teetering/stun
-			if self.next_step_dir and not self.step_dir then
-				self:step(self.next_step_dir)
-			end
-			-- actually move
-			self.prev_col,self.prev_row=self:col(),self:row()
-			if self.stun_frames<=0 then
-				self.vx,self.vy=0,0
-				self:apply_step()
-				self:apply_velocity()
-				local col,row=self:col(),self:row()
-				if self.prev_col!=col or self.prev_row!=row then
-					-- teeter off the edge of the earth if the player tries to move off the map
-					if col!=mid(1,col,8) or row!=mid(1,row,5) then
-						self:undo_step()
-						self.teeter_frames=11
-					end
-					-- bump into an obstacle or reflection
-					local occupant=get_tile_occupant(col,row)
-					if occupant or (player_reflection and (self.prev_col<5)!=(col<5)) then
-						self:bump()
-						if occupant then
-							occupant:get_bumped()
-						end
-					end
-				end
-			end
-			return false
-		end,
-		draw=function(self,x,y)
+		-- draw
+		function(self,x,y)
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
 				local sx,sy,sh,dx,dy,facing,flipped=0,0,8,3+4*self.facing,6,self.facing,self.facing==0
 				-- up/down sprites are below the left/right sprites in the spritesheet
@@ -287,6 +253,54 @@ local entity_classes={
 				sspr2(sx,sy,11,sh,x-dx,y-dy,flipped)
 			end
 		end,
+		-- update
+		function(self)
+			decrement_counter_prop(self,"stun_frames")
+			decrement_counter_prop(self,"teeter_frames")
+			decrement_counter_prop(self,"bump_frames")
+			-- try moving
+			self:check_inputs()
+			-- apply moves that were delayed from teetering/stun
+			if self.next_step_dir and not self.step_dir then
+				self:step(self.next_step_dir)
+			end
+			-- actually move
+			self.prev_col,self.prev_row=self:col(),self:row()
+			if self.stun_frames<=0 then
+				self.vx,self.vy=0,0
+				self:apply_step()
+				self:apply_velocity()
+				local col,row=self:col(),self:row()
+				if self.prev_col!=col or self.prev_row!=row then
+					-- teeter off the edge of the earth if the player tries to move off the map
+					if col!=mid(1,col,8) or row!=mid(1,row,5) then
+						self:undo_step()
+						self.teeter_frames=11
+					end
+					-- bump into an obstacle or reflection
+					local occupant=get_tile_occupant(col,row)
+					if occupant or (player_reflection and (self.prev_col<5)!=(col<5)) then
+						self:bump()
+						if occupant then
+							occupant:get_bumped()
+						end
+					end
+				end
+			end
+			return false
+		end,
+		hitbox_channel=2, -- pickup
+		hurtbox_channel=1, -- player
+		facing=1, -- 0 = left, 1 = right, 2 = up, 3 = down
+		step_frames=0,
+		teeter_frames=0,
+		bump_frames=0,
+		stun_frames=0,
+		primary_color=12,
+		secondary_color=13,
+		tertiary_color=0,
+		x=35,
+		y=20,
 		check_inputs=function(self)
 			local i
 			for i=0,3 do
@@ -346,19 +360,8 @@ local entity_classes={
 		end
 	},
 	player_health={
-		is_pause_immune=true,
-		x=63,
-		y=122,
-		hearts=4,
-		-- anim=nil,
-		anim_frames=0,
-		render_layer=13,
-		update=function(self)
-			if decrement_counter_prop(self,"anim_frames") then
-				self.anim=nil
-			end
-		end,
-		draw=function(self,x,y)
+		-- draw
+		function(self,x,y)
 			if self.visible then
 				local i
 				for i=1,4 do
@@ -377,6 +380,19 @@ local entity_classes={
 				end
 			end
 		end,
+		-- update
+		function(self)
+			if decrement_counter_prop(self,"anim_frames") then
+				self.anim=nil
+			end
+		end,
+		is_pause_immune=true,
+		x=63,
+		y=122,
+		hearts=4,
+		-- anim=nil,
+		anim_frames=0,
+		render_layer=13,
 		gain_heart=function(self)
 			if self.hearts<4 then
 				self.hearts+=1
@@ -397,7 +413,7 @@ local entity_classes={
 				spawn_entity("death_prompt")
 				player_figment=spawn_entity("player_figment",player.x+23,player.y+65)
 				player_figment:promise("move",63,72,60,linear)
-				curtains:set_anim("close")
+				curtains:set_anim() -- close
 				player_health:promise_sequence(
 					30,
 					{"move",63,45,60,ease_in_out,{-60,10,-40,10}})
@@ -407,6 +423,21 @@ local entity_classes={
 		end
 	},
 	boss_health={
+		-- draw
+		function(self)
+			if self.visible then
+				rect(33,2,93,8,ternary(self.rainbow_frames>0,rainbow_color,5))
+				rectfill(33,2,mid(33,32+self.health,92),8)
+			end
+		end,
+		-- update
+		function(self)
+			decrement_counter_prop(self,"rainbow_frames")
+			if self.drain_frames>0 then
+				self.health-=1
+			end
+			decrement_counter_prop(self,"drain_frames")
+		end,
 		-- x=63,
 		-- y=5,
 		-- visible=false,
@@ -414,19 +445,6 @@ local entity_classes={
 		rainbow_frames=0,
 		render_layer=13,
 		drain_frames=0,
-		update=function(self)
-			decrement_counter_prop(self,"rainbow_frames")
-			if self.drain_frames>0 then
-				self.health-=1
-			end
-			decrement_counter_prop(self,"drain_frames")
-		end,
-		draw=function(self)
-			if self.visible then
-				rect(33,2,93,8,ternary(self.rainbow_frames>0,rainbow_color,5))
-				rectfill(33,2,mid(33,32+self.health,92),8)
-			end
-		end,
 		gain_health=function(self)
 			if self.health<60 then
 				self.health,self.visible,self.rainbow_frames=mid(0,self.health+1,60),true,15
@@ -458,7 +476,7 @@ local entity_classes={
 							"die",
 							120,
 							function()
-								curtains:set_anim("close")
+								curtains:set_anim() -- close
 							end,
 							100,
 							function()
@@ -493,13 +511,14 @@ local entity_classes={
 		end
 	},
 	magic_tile_spawn={
-		frames_to_death=10,
-		draw=function(self,x,y,f,f2)
+		-- draw
+		function(self,x,y,f,f2)
 			if f2<=10 then
 				f2+=3
 				rect(x-f2-1,y-f2,x+f2+1,y+f2,ternary(f<4,5,6))
 			end
 		end,
+		frames_to_death=10,
 		on_death=function(self)
 			freeze_and_shake_screen(0,1)
 			spawn_entity("magic_tile",self)
@@ -507,16 +526,8 @@ local entity_classes={
 		end
 	},
 	magic_tile={
-		render_layer=3,
-		hurtbox_channel=2, -- pickup
-		is_boss_generated=true,
-		update=function(self)
-			if get_tile_occupant(self:col(),self:row()) then
-				self:die()
-				spawn_magic_tile(10)
-			end
-		end,
-		draw=function(self,x,y,f,f2)
+		-- draw
+		function(self,x,y,f,f2)
 			local tile_color,bg_color=rainbow_color,1
 			if f2>0 or f<4 then
 				tile_color,bg_color=7,7
@@ -528,6 +539,16 @@ local entity_classes={
 			pal(5,bg_color)
 			sspr2(55,38,9,7,x-4,y-3)
 		end,
+		-- update
+		function(self)
+			if get_tile_occupant(self:col(),self:row()) then
+				self:die()
+				spawn_magic_tile(10)
+			end
+		end,
+		render_layer=3,
+		hurtbox_channel=2, -- pickup
+		is_boss_generated=true,
 		on_hurt=function(self)
 			score+=score_mult
 			spawn_entity("points",self.x,self.y-7,{points=score_mult})
@@ -588,18 +609,10 @@ local entity_classes={
 		end
 	},
 	playing_card={
-		-- vx,has_heart
-		frames_to_death=75,
-		hitbox_channel=1, -- player
-		is_boss_generated=true,
-		update=function(self)
-			if self.frames_alive==50 and self.has_heart then
-				spawn_entity("heart",self)
-			end
-		end,
-		draw=function(self,x,y,f)
+		-- draw
+		function(self,x,y,f)
 			-- some cards are red
-			if self.has_heart then
+			if self.is_red then
 				pal(5,8)
 				pal(6,15)
 			end
@@ -610,18 +623,15 @@ local entity_classes={
 			end
 			-- draw the card
 			sspr2(10*f+77,21,10,10,x-5,y-7)
-		end
+		end,
+		-- vx,is_red
+		frames_to_death=75,
+		hitbox_channel=1, -- player
+		is_boss_generated=true
 	},
 	flower_patch={
-		render_layer=4,
-		is_boss_generated=true,
-		hit_frames=0,
-		update=function(self)
-			if decrement_counter_prop(self,"hit_frames") then
-				self.hitbox_channel=0
-			end
-		end,
-		draw=function(self,x,y)
+		-- draw
+		function(self,x,y)
 			local sx=101
 			if self.hit_frames>0 then
 				sx=119
@@ -630,12 +640,37 @@ local entity_classes={
 			end
 			sspr2(sx,71,9,8,x-4,y-4)
 		end,
+		-- update
+		function(self)
+			if decrement_counter_prop(self,"hit_frames") then
+				self.hitbox_channel=0
+			end
+		end,
+		render_layer=4,
+		is_boss_generated=true,
+		hit_frames=0,
 		bloom=function(self)
 			self.frames_to_death,self.hit_frames,self.hitbox_channel=ternary(boss_phase==4,10,30),3,1
 			spawn_petals(self.x,self.y,2,8)
 		end
 	},
 	coin={
+		-- draw
+		function(self,x,y,f)
+			if f<36 then
+				circfill(self.target_x,self.target_y,min(flr(f/7),4),2)
+			end
+			local sprite=0
+			if f>20 then
+				sprite=2
+			end
+			if f>=30 then
+				sprite=ternary(self.health<3,5,4)
+			else
+				sprite+=flr(f/3)%2
+			end
+			sspr(9*sprite,37,9,9,x-4,y-5)
+		end,
 		is_boss_generated=true,
 		health=3,
 		init=function(self)
@@ -656,21 +691,6 @@ local entity_classes={
 					self.hurtbox_channel=4 -- coin
 				end)
 		end,
-		draw=function(self,x,y,f)
-			if f<36 then
-				circfill(self.target_x,self.target_y,min(flr(f/7),4),2)
-			end
-			local sprite=0
-			if f>20 then
-				sprite=2
-			end
-			if f>=30 then
-				sprite=ternary(self.health<3,5,4)
-			else
-				sprite+=flr(f/3)%2
-			end
-			sspr(9*sprite,37,9,9,x-4,y-5)
-		end,
 		get_bumped=function(self)
 			self.health-=1
 			if self.health<=0 then
@@ -679,12 +699,20 @@ local entity_classes={
 		end,
 		on_death=function(self)
 			spawn_particle_burst(self.x,self.y,6,6,4)
-			if self.has_heart then
-				spawn_entity("heart",self)
-			end
 		end
 	},
 	particle={
+		-- draw
+		function(self,x,y)
+			line(x,y,self.prev_x,self.prev_y,ternary(self.color==16,rainbow_color,self.color))
+		end,
+		-- update
+		function(self)
+			self.vy+=self.gravity
+			self.vx*=self.friction
+			self.vy*=self.friction
+			self.prev_x,self.prev_y=self.x,self.y
+		end,
 		render_layer=11,
 		friction=1,
 		gravity=0,
@@ -692,55 +720,11 @@ local entity_classes={
 		init=function(self)
 			self:update()
 			self:apply_velocity()
-		end,
-		update=function(self)
-			self.vy+=self.gravity
-			self.vx*=self.friction
-			self.vy*=self.friction
-			self.prev_x,self.prev_y=self.x,self.y
-		end,
-		draw=function(self,x,y)
-			line(x,y,self.prev_x,self.prev_y,ternary(self.color==16,rainbow_color,self.color))
 		end
 	},
 	magic_mirror={
-		render_layer=7,
-		x=40,
-		y=-28,
-		home_x=40,
-		home_y=-28,
-		expression=4,
-		laser_charge_frames=0,
-		laser_preview_frames=0,
-		idle_mult=0,
-		idle_x=0,
-		idle_y=0,
-		-- visible=false,
-		init=function(self)
-			local props,y={mirror=self,is_reflection=self.is_reflection},self.y+5
-			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,y,props)
-			self.coins,self.flowers,props.is_right_hand,props.dir={},{},true,1
-			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,y,props)
-		end,
-		update=function(self)
-			decrement_counter_prop(self,"laser_charge_frames")
-			decrement_counter_prop(self,"laser_preview_frames")
-			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
-			self.idle_x,self.idle_y=self.idle_mult*3*sin(self.frames_alive/60),self.idle_mult*2*sin(self.frames_alive/30)
-			self:apply_velocity()
-			-- keep mirror in bounds (for reeling purposes)
-			self.x,self.y=mid(0,self.x,80),mid(-40,self.y,-20)
-			-- create particles when charging laser
-			if self.laser_charge_frames>0 then
-				local x,y,angle=self.x,self.y,rnd()
-				spawn_entity("particle",x+22*cos(angle),y+22*sin(angle),{
-					color=14,
-					frames_to_death=18
-				}):move(x,y,20,ease_out)
-			end
-			return false
-		end,
-		draw=function(self)
+		-- draw
+		function(self)
 			local x,y,expression=self.x+self.idle_x,self.y+self.idle_y,self.expression
 			if boss_health.rainbow_frames>12 then
 				x+=scene_frame%2*2-1
@@ -781,6 +765,43 @@ local entity_classes={
 				end
 			end
 		end,
+		-- update
+		function(self)
+			decrement_counter_prop(self,"laser_charge_frames")
+			decrement_counter_prop(self,"laser_preview_frames")
+			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
+			self.idle_x,self.idle_y=self.idle_mult*3*sin(self.frames_alive/60),self.idle_mult*2*sin(self.frames_alive/30)
+			self:apply_velocity()
+			-- keep mirror in bounds (for reeling purposes)
+			self.x,self.y=mid(0,self.x,80),mid(-40,self.y,-20)
+			-- create particles when charging laser
+			if self.laser_charge_frames>0 then
+				local x,y,angle=self.x,self.y,rnd()
+				spawn_entity("particle",x+22*cos(angle),y+22*sin(angle),{
+					color=14,
+					frames_to_death=18
+				}):move(x,y,20,ease_out)
+			end
+			return false
+		end,
+		render_layer=7,
+		x=40,
+		y=-28,
+		home_x=40,
+		home_y=-28,
+		expression=4,
+		laser_charge_frames=0,
+		laser_preview_frames=0,
+		idle_mult=0,
+		idle_x=0,
+		idle_y=0,
+		-- visible=false,
+		init=function(self)
+			local props,y={mirror=self,is_reflection=self.is_reflection},self.y+5
+			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,y,props)
+			self.coins,self.flowers,props.is_right_hand,props.dir={},{},true,1
+			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,y,props)
+		end,
 		on_death=function(self)
 			self.left_hand:die()
 			self.right_hand:die()
@@ -810,12 +831,11 @@ local entity_classes={
 		decide_next_action=function(self)
 			local promise=self:promise(1)
 			if boss_phase==1 then
-				local r=2*rnd_int(0,2)+1
 				promise=self:promise_sequence(
 					{"set_held_state","right"},
-					{"throw_cards",r,"left"},
+					{"throw_cards","left"},
 					{"return_to_ready_position",nil,"left"},
-					{"throw_cards",r,"right"},
+					{"throw_cards","right"},
 					{"return_to_ready_position",nil,"left"},
 					"shoot_lasers",
 					{"return_to_ready_position",nil,"right"})
@@ -866,12 +886,12 @@ local entity_classes={
 					end,
 					"throw_cards",
 					"return_to_ready_position",
-					100)
+					100,
 				-- throw coins together
-					:and_then_parallel(
-						"despawn_coins",
-						{boss_reflection,"despawn_coins"})
-					:and_then_sequence(
+					function()
+						boss_reflection:despawn_coins()
+					end,
+					"despawn_coins",
 					"throw_coins",
 					"return_to_ready_position",
 					{boss_reflection,"throw_coins",player_reflection},
@@ -1016,28 +1036,26 @@ local entity_classes={
 				{self.right_hand,"pound",-offset})
 		end,
 		reel=function(self,times)
+			spawn_entity("heart",10*rnd_int(3,6)-5,4)
 			if boss_phase==3 then
 				self.is_cracked=true
 			end
-			spawn_particle_burst(self.x,self.y,20,7,10)
-			local promise,i=self:promise_sequence(
+			-- spawn_particle_burst(self.x,self.y,20,7,10)
+			return self:promise_sequence(
 				{"set_expression",8},
 				"set_all_idle")
 				:and_then_parallel(
 					self.left_hand:promise_sequence("set_pose","appear"),
 					self.right_hand:promise_sequence("set_pose","appear")
 				)
-			for i=1,times do
-				promise=promise:and_then_sequence(
+				:and_then_repeat(times,
 					function()
 						freeze_and_shake_screen(0,3)
 						self:poof(rnd_int(-15,15),rnd_int(-15,15))
 						self.left_hand:move(rnd_int(-8,8),rnd_int(-8,8),6,ease_out,nil,true)
 						self.right_hand:move(rnd_int(-8,8),rnd_int(-8,8),6,ease_out,nil,true)
-					end,
-					{"move",rnd_int(-8,8),rnd_int(-5,2),6,ease_out,nil,true})
-			end
-			return promise
+						return self:move(rnd_int(-8,8),rnd_int(-5,2),6,ease_out,nil,true)
+					end)
 		end,
 		conjure_flowers=function(self)
 			-- generate a list of flower locations
@@ -1084,38 +1102,36 @@ local entity_classes={
 		cast_reflection=function(self,upgraded_version)
 			local lh,rh,i=self.left_hand,self.right_hand
 			-- concentrate
-			local promise=self:promise_sequence(
+			return self:promise_sequence(
 				"set_all_idle",
 				{"set_expression",2},
 				{lh,"move",23,14,20,ease_in,nil,true},
-				{"set_pose",1})
-			-- wave one hand over the other
-			for i=1,2 do
-				promise=promise:and_then_sequence(
-					{rh,"move",-10,0,20,linear,{0,-3,0,-3},true},
-					{"move",10,0,20,linear,{0,3,0,3},true})
-			end
+				{"set_pose",1},
+				{rh,"wave"},
+				"wave",
+				function()
+					if upgraded_version then
+						return rh:promise(
+							{"set_pose",1},
+							function()
+								rh.is_holding_wand=true
+							end,
+							{"poof",-10})
+					end
+				end,
 			-- poof! the wands appear
-			if upgraded_version then
-				promise:and_then_sequence(
-					{rh,"set_pose",1},
-					function()
-						rh.is_holding_wand=true
-					end,
-					{"poof",-10})
-			end
-			promise=promise:and_then_sequence(
 				{self,"set_expression",1},
 				function()
 					lh.is_holding_wand=true
 				end,
 				{lh,"poof",10},
-				30)
+				30,
 			-- raise the wands to cast a spell
-			if upgraded_version then
-				promise:and_then(rh,"flourish_wand")
-			end
-			return promise:and_then_sequence(
+				function()
+					if upgraded_version then
+						promise:and_then(rh,"flourish_wand")
+					end
+				end,
 				{lh,"flourish_wand"},
 				{self,"set_expression",3},
 				5,
@@ -1131,21 +1147,19 @@ local entity_classes={
 			-- cooldown
 				55)
 		end,
-		throw_cards=function(self,heart_row,hand)
-			heart_row=heart_row or rnd_int(1,5)
+		throw_cards=function(self,hand)
 			local promises={}
 			if hand!="right" then
-				add(promises,{self.left_hand,"throw_cards",heart_row})
+				add(promises,{self.left_hand,"throw_cards"})
 			end
 			if hand!="left" then
-				add(promises,{self.right_hand,"throw_cards",heart_row})
+				add(promises,{self.right_hand,"throw_cards"})
 			end
 			return self:promise_parallel(unpack(promises))
 		end,
 		throw_coins=function(self,target)
-			local promise,i=self.right_hand:promise("move_to_temple")
-			for i=1,3 do
-				promise=promise:and_then_sequence(
+			return self.right_hand:promise("move_to_temple")
+				:and_then_repeat(3,
 					{self.right_hand,"set_pose",1},
 					{self,"set_expression",7},
 					"set_all_idle",
@@ -1156,45 +1170,41 @@ local entity_classes={
 					{self.right_hand,"set_pose",4},
 					{self,"set_expression",3},
 					20)
-			end
-			return promise
 		end,
 		shoot_lasers=function(self)
 			self.left_hand:disappear()
-			local promise=self:promise_sequence(
+			local col=rnd_int(0,7)
+			return self:promise_sequence(
 				{"set_held_state","right"},
 				"set_expression",
-				"set_all_idle")
-			local col,i=rnd_int(0,7)
-			for i=1,3 do
-				col=(col+rnd_int(2,6))%8
-				promise=promise:and_then_sequence(
-					-- move to a random column
-					{"move",10*col+5,-20,15,ease_in,{0,-10,0,-10}},
-					-- charge a laser
+				"set_all_idle"):and_then_repeat(3,
 					function()
-						self.laser_charge_frames=10
-					end,
-					14,
-					function()
-						self.laser_preview_frames=6
-					end,
-					6,
-					-- shoot a laser
-					{"set_expression",0},
-					function()
-						freeze_and_shake_screen(0,4)
-						spawn_entity("mirror_laser",self)
-					end,
-					14,
-					-- cooldown
-					"set_expression",
-					function()
-						self.laser_preview_frames=6
-					end,
-					6)
-			end
-			return promise
+						col=(col+rnd_int(2,6))%8
+						return self:promise_sequence(
+							-- move to a random column
+							{"move",10*col+5,-20,15,ease_in,{0,-10,0,-10}},
+							-- charge a laser
+							function()
+								self.laser_charge_frames=10
+							end,
+							14,
+							"preview_laser",
+							6,
+							-- shoot a laser
+							{"set_expression",0},
+							function()
+								freeze_and_shake_screen(0,4)
+								spawn_entity("mirror_laser",self)
+							end,
+							14,
+							-- cooldown
+							"set_expression",
+							"preview_laser",
+							6)
+					end)
+		end,
+		preview_laser=function(self)
+			self.laser_preview_frames=6
 		end,
 		return_to_ready_position=function(self,expression,held_hand)
 			local lh,rh,home_x,home_y=self.left_hand,self.right_hand,self.home_x,self.home_y
@@ -1268,28 +1278,8 @@ local entity_classes={
 		end
 	},
 	magic_mirror_hand={
-		-- is_right_hand,dir
-		-- is_holding_bouquet=false,
-		render_layer=8,
-		pose=3,
-		dir=-1,
-		idle_mult=0,
-		idle_x=0,
-		idle_y=0,
-		update=function(self)
-			if self.is_reflection then
-				self.render_layer=6
-			end
-			local f,m=boss.frames_alive+ternary(self.is_right_hand,9,4),self.mirror
-			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
-			self.idle_x,self.idle_y=self.idle_mult*3*sin(f/60),self.idle_mult*4*sin(f/30)
-			self:apply_velocity()
-			if self.is_holding_mirror then
-				self.idle_x,self.idle_y,self.x,self.y=m.idle_x,m.idle_y,m.x+2*self.dir,m.y+13
-			end
-			return false
-		end,
-		draw=function(self)
+		-- draw
+		function(self)
 			local x,y=self.x+self.idle_x,self.y+self.idle_y-8
 			if self.visible then
 				-- hand may be holding a bouquet
@@ -1315,11 +1305,33 @@ local entity_classes={
 				end
 			end
 		end,
+		-- update
+		function(self)
+			if self.is_reflection then
+				self.render_layer=6
+			end
+			local f,m=boss.frames_alive+ternary(self.is_right_hand,9,4),self.mirror
+			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
+			self.idle_x,self.idle_y=self.idle_mult*3*sin(f/60),self.idle_mult*4*sin(f/30)
+			self:apply_velocity()
+			if self.is_holding_mirror then
+				self.idle_x,self.idle_y,self.x,self.y=m.idle_x,m.idle_y,m.x+2*self.dir,m.y+13
+			end
+			return false
+		end,
+		-- is_right_hand,dir
+		-- is_holding_bouquet=false,
+		render_layer=8,
+		pose=3,
+		dir=-1,
+		idle_mult=0,
+		idle_x=0,
+		idle_y=0,
 		copy_hand=function(self,hand)
 			self.pose,self.x,self.y,self.visible=hand.pose,hand.x,hand.y,hand.visible
 		end,
 		-- highest-level commands
-		throw_cards=function(self,heart_row)
+		throw_cards=function(self)
 			local dir,r=self.dir
 			local promise=self:promise_sequence(
 				8-dir*8,
@@ -1338,7 +1350,7 @@ local entity_classes={
 					function()
 						spawn_entity("playing_card",self.x-10*dir,self.y,{
 							vx=-1.5*dir,
-							has_heart=(r==heart_row)
+							is_red=rnd()<0.5
 						})
 					end,
 					6,
@@ -1383,6 +1395,11 @@ local entity_classes={
 				return self:poof()
 			end
 		end,
+		wave=function(self)
+			return self:promise_sequence(
+				{"move",-10,0,20,linear,{0,-3,0,-3},true},
+				{"move",10,0,20,linear,{0,3,0,3},true})
+		end,
 		disappear=function(self)
 			self.visible=false
 			return self:poof()
@@ -1413,31 +1430,33 @@ local entity_classes={
 		end
 	},
 	mirror_laser={
-		hitbox_channel=1, -- player
-		is_boss_generated=true,
-		render_layer=9,
-		frames_to_death=14,
-		draw=function(self,x,y)
+		-- draw
+		function(self,x,y)
 			y+=4
 			rectfill(x-5,y,x+5,100,14)
 			rectfill(x-4,y,x+4,100,15)
 			rectfill(x-3,y,x+3,100,7)
 		end,
+		hitbox_channel=1, -- player
+		is_boss_generated=true,
+		render_layer=9,
+		frames_to_death=14,
 		is_hitting=function(self,entity)
 			return self:col()==entity:col()
 		end
 	},
 	heart={
-		frames_to_death=150,
-		hurtbox_channel=2, -- pickup
-		draw=function(self,x,y,f,f2)
+		-- draw
+		function(self,x,y,f,f2)
 			if f2>30 or f2%4>1 then
 				if (f2+4)%30>14 then
 					pal(14,8)
 				end
-				sspr2(ternary(f2%30<20,36,45),30,9,7,x-4,y-5-max(0,f-0.09*f*f))
+				sspr2(ternary(f2%30<20,36,45),30,9,7,x-4,y-5-max(0,f-0.07*f*f))
 			end
 		end,
+		frames_to_death=150,
+		hurtbox_channel=2, -- pickup
 		on_hurt=function(self)
 			freeze_and_shake_screen(2,0)
 			player_health:gain_heart()
@@ -1446,33 +1465,36 @@ local entity_classes={
 		end
 	},
 	poof={
-		frames_to_death=12,
-		render_layer=9,
-		draw=function(self,x,y,f)
+		-- draw
+		function(self,x,y,f)
 			sspr2(64+16*flr(f/3),31,16,14,x-8,y-8)
-		end
+		end,
+		frames_to_death=12,
+		render_layer=9
 	},
 	pain={
-		is_pause_immune=true,
-		render_layer=12,
-		frames_to_death=5,
-		draw=function(self,x,y)
+		-- draw
+		function(self,x,y)
 			pal(7,10)
 			if self.frames_to_death<=2 then
 				palt(10,true)
 			end
 			sspr2(105,45,23,26,x-11,y-16)
-		end
+		end,
+		is_pause_immune=true,
+		render_layer=12,
+		frames_to_death=5
 	},
 	points={
-		render_layer=10,
-		vy=-0.5,
-		frames_to_death=30,
-		draw=function(self,x,y)
+		-- draw
+		function(self,x,y)
 			pset(x,y,8)
 			local text="+"..self.points.."00"
 			print(text,x-2*#text,y,rainbow_color)
-		end
+		end,
+		render_layer=10,
+		vy=-0.5,
+		frames_to_death=30
 	}
 }
 
@@ -1808,6 +1830,7 @@ function spawn_entity(class_name,x,y,args,skip_init)
 	for k,v in pairs(entity_classes[class_name]) do
 		entity[k]=v
 	end
+	entity.update,entity.draw=entity_classes[class_name][2] or entity.update,entity_classes[class_name][1] or entity.draw
 	entity.class_name=class_name
 	-- add properties onto it from the arguments
 	for k,v in pairs(args or {}) do
@@ -1923,6 +1946,14 @@ function make_promise(ctx,fn,...)
 			end
 			if #promises>0 then
 				return promise:and_then_sequence(unpack(promises))
+			end
+			return promise
+		end,
+		and_then_repeat=function(self,times,...)
+			local promise=self
+			local i
+			for i=1,times do
+				promise=promise:and_then_sequence(...)
 			end
 			return promise
 		end,
