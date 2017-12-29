@@ -4,7 +4,7 @@ __lua__
 --[[
 coordinates:
   +x is right, -x is left
-  +y is towards the player, -y is away from the player
+  +y is down / towards the screen, -y is up / away from the screen
            x=1   x=2.5
             v     v
           +---+---+
@@ -22,6 +22,11 @@ todo:
 	hard mode
 	tweak gameplay
 	lots of playtesting
+
+tokens:
+	entity classes		6240
+	big three methods	546
+	all other methods	1355
 ]]
 
 -- useful noop function
@@ -35,24 +40,20 @@ local one_hit_death=false
 local starting_phase=4
 
 -- global scene vars
-local scene_frame
-local freeze_frames
-local screen_shake_frames
-local is_paused
+local scene_frame,freeze_frames,screen_shake_frames,is_paused=0,0,0 -- ,false
 
 -- global game vars
-local boss_phase
-local rainbow_color
-local dark_rainbow_color
-local score
-local score_mult
+local boss_phase=0
+local rainbow_color,dark_rainbow_color=8,2
+local score=0
+local score_mult=1
 
 -- global promise vars
 local promises={}
 
 -- global entity vars
-local entities
-local new_entities
+local entities={}
+local new_entities={}
 local title_screen
 local player
 local player_health
@@ -81,7 +82,6 @@ local entity_classes={
 		frames_to_death=100,
 		update=function(self)
 			self.vy+=0.1
-			self:apply_velocity()
 		end,
 		draw=function(self)
 			sspr2(47,71,14,13,self.x-7,self.y-7,self.vx>0)
@@ -117,7 +117,6 @@ local entity_classes={
 		end
 	},
 	title_screen={
-		extends="movable",
 		x=40,
 		y=26,
 		is_user_interface=true,
@@ -149,7 +148,6 @@ local entity_classes={
 						end
 					end)
 			end
-			self:apply_move()
 		end,
 		draw=function(self)
 			sspr2(0,71,47,16,self.x,self.y)
@@ -208,58 +206,10 @@ local entity_classes={
 			end
 		end
 	},
-	movable={
-		apply_move=function(self)
-			local move=self.movement
-			if move then
-				move.frames+=1
-				local t=move.easing(move.frames/move.duration)
-				local i
-				self.vx,self.vy=-self.x,-self.y
-				for i=0,3 do
-					local m=ternary(i%3>0,3,1)*t^i*(1-t)^(3-i)
-					self.vx+=m*move.bezier[2*i+1]
-					self.vy+=m*move.bezier[2*i+2]
-				end
-				if move.frames>=move.duration then
-					self.x,self.y,self.vx,self.vy,self.movement=move.final_x,move.final_y,0,0 -- ,nil
-				end
-			end
-			self:apply_velocity()
-		end,
-		move=function(self,x,y,dur,easing,anchors,is_relative)
-			local start_x,start_y,end_x,end_y=self.x,self.y,x,y
-			if is_relative then
-				end_x+=start_x
-				end_y+=start_y
-			end
-			local dx,dy=end_x-start_x,end_y-start_y
-			anchors=anchors or {dx/4,dy/4,-dx/4,-dy/4}
-			self.movement={
-				frames=0,
-				duration=dur,
-				final_x=end_x,
-				final_y=end_y,
-				easing=easing or linear,
-				bezier={start_x,start_y,
-					start_x+anchors[1],start_y+anchors[2],
-					end_x+anchors[3],end_y+anchors[4],
-					end_x,end_y}
-			}
-			return max(0,dur-1)
-		end,
-		cancel_move=function(self)
-			self.vx,self,vy,self.movement=0,0 -- ,nil
-		end
-	},
 	player_figment={
 		is_pause_immune=true,
-		extends="movable",
 		is_user_interface=true,
 		render_layer=17,
-		update=function(self)
-			self:apply_move()
-		end,
 		draw=function(self)
 			if self.frames_alive<120 then
 				sspr2(88,4,9,8,self.x-4,self.y-6)
@@ -314,6 +264,7 @@ local entity_classes={
 					end
 				end
 			end
+			return false
 		end,
 		draw=function(self)
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
@@ -416,7 +367,6 @@ local entity_classes={
 		end
 	},
 	player_health={
-		extends="movable",
 		is_pause_immune=true,
 		x=63,
 		y=122,
@@ -428,7 +378,6 @@ local entity_classes={
 			if decrement_counter_prop(self,"anim_frames") then
 				self.anim=nil
 			end
-			self:apply_move()
 		end,
 		draw=function(self)
 			if self.visible then
@@ -626,7 +575,6 @@ local entity_classes={
 	},
 	player_reflection={
 		extends="player",
-		update_priority=10,
 		primary_color=11,
 		secondary_color=3,
 		tertiary_color=3,
@@ -643,6 +591,7 @@ local entity_classes={
 				self:copy_player()
 				occupant:get_bumped()
 			end
+			return false
 		end,
 		on_hurt=function(self,entity)
 			if player then
@@ -670,7 +619,6 @@ local entity_classes={
 			if self.frames_alive==50 and self.has_heart then
 				spawn_entity("heart",self.x,self.y)
 			end
-			self:apply_velocity()
 		end,
 		draw=function(self)
 			-- some cards are red
@@ -711,7 +659,6 @@ local entity_classes={
 		end
 	},
 	coin={
-		extends="movable",
 		is_boss_generated=true,
 		health=3,
 		init=function(self)
@@ -731,9 +678,6 @@ local entity_classes={
 					self.hitbox_channel=1 -- player
 					self.hurtbox_channel=4 -- coin
 				end)
-		end,
-		update=function(self)
-			self:apply_move()
 		end,
 		draw=function(self)
 			if self.frames_alive<36 then
@@ -765,19 +709,18 @@ local entity_classes={
 	},
 	particle={
 		render_layer=11,
-		extends="movable",
 		friction=1,
 		gravity=0,
 		color=7,
 		init=function(self)
 			self:update()
+			self:apply_velocity()
 		end,
 		update=function(self)
 			self.vy+=self.gravity
 			self.vx*=self.friction
 			self.vy*=self.friction
 			self.prev_x,self.prev_y=self.x,self.y
-			self:apply_move()
 		end,
 		draw=function(self)
 			line(self.x,self.y,self.prev_x,self.prev_y,ternary(self.color==16,rainbow_color,self.color))
@@ -785,7 +728,6 @@ local entity_classes={
 	},
 	magic_mirror={
 		render_layer=7,
-		extends="movable",
 		x=40,
 		y=-28,
 		home_x=40,
@@ -808,7 +750,7 @@ local entity_classes={
 			decrement_counter_prop(self,"laser_preview_frames")
 			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
 			self.idle_x,self.idle_y=self.idle_mult*3*sin(self.frames_alive/60),self.idle_mult*2*sin(self.frames_alive/30)
-			self:apply_move()
+			self:apply_velocity()
 			-- keep mirror in bounds (for reeling purposes)
 			self.x,self.y=mid(0,self.x,80),mid(-40,self.y,-20)
 			-- create particles when charging laser
@@ -819,6 +761,7 @@ local entity_classes={
 					frames_to_death=18
 				}):move(x,y,20,ease_out)
 			end
+			return false
 		end,
 		draw=function(self)
 			local x,y,expression=self.x+self.idle_x,self.y+self.idle_y,self.expression
@@ -1349,7 +1292,6 @@ local entity_classes={
 	},
 	magic_mirror_hand={
 		-- is_right_hand,dir
-		extends="movable",
 		-- is_holding_bouquet=false,
 		render_layer=8,
 		pose=3,
@@ -1364,10 +1306,11 @@ local entity_classes={
 			local f,m=boss.frames_alive+ternary(self.is_right_hand,9,4),self.mirror
 			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
 			self.idle_x,self.idle_y=self.idle_mult*3*sin(f/60),self.idle_mult*4*sin(f/30)
-			self:apply_move()
+			self:apply_velocity()
 			if self.is_holding_mirror then
 				self.idle_x,self.idle_y,self.x,self.y=m.idle_x,m.idle_y,m.x+2*self.dir,m.y+13
 			end
+			return false
 		end,
 		draw=function(self)
 			local x,y=self.x+self.idle_x,self.y+self.idle_y-8
@@ -1559,15 +1502,13 @@ local entity_classes={
 
 -- primary pico-8 functions (_init, _update, _draw)
 function _init()
-	scene_frame,freeze_frames,screen_shake_frames,is_paused=0,0,0 -- ,false
-	calc_rainbow_color()
-	init_game()
+	-- create starting entities
+	title_screen,left_curtain,right_curtain=spawn_entity("title_screen"),spawn_entity("curtain",1),spawn_entity("curtain",125,0,{dir=-1})
+	-- immediately add new entities to the game
+	add_new_entities()
 end
 
--- local skip_frames=0
 function _update()
-	-- skip_frames=increment_counter(skip_frames)
-	-- if skip_frames%1>0 then return end
 	if freeze_frames>0 then
 		freeze_frames=decrement_counter(freeze_frames)
 		if player then
@@ -1575,127 +1516,75 @@ function _update()
 		end
 	else
 		screen_shake_frames,scene_frame=decrement_counter(screen_shake_frames),increment_counter(scene_frame)
-		calc_rainbow_color()
+		local num_promises,rainbow_frames=#promises,1+flr(scene_frame/4)%6
+		-- calculate rainbow colors
+		rainbow_color,dark_rainbow_color=({8,9,10,11,12,14})[rainbow_frames],({2,4,9,3,13,8})[rainbow_frames]
 		-- update promises
-		local num_promises,i=#promises
+		local i
 		for i=1,num_promises do
 			promises[i]:update()
 		end
 		filter_out_finished(promises)
-		-- update the scene
-		update_game()
-	end
-end
-
-function _draw()
-	-- clear the screen
-	cls()
-	-- call the draw function of the current scene
-	draw_game()
-	-- draw debug info
-	-- camera()
-	-- print("mem:      "..flr(100*(stat(0)/1024)).."%",2,102,ternary(stat(1)>=819,8,3))
-	-- print("cpu:      "..flr(100*stat(1)).."%",2,109,ternary(stat(1)>=0.8,8,3))
-	-- print("entities: "..#entities,2,116,ternary(#entities>120,8,3))
-	-- print("promises: "..#promises,2,123,ternary(#promises>30,8,3))
-end
-
-
--- game functions
-function init_game()
-	-- reset everything
-	entities,new_entities,score,score_mult,boss_phase={},{},0,1,0
-	-- create starting entities
-	-- player_health,player,player_reflection=spawn_entity("player_health"),spawn_entity("player",35,20) -- ,nil
-	title_screen=spawn_entity("title_screen")
-	left_curtain=spawn_entity("curtain",1)
-	right_curtain=spawn_entity("curtain",125,0,{dir=-1})
-	-- boss_health,boss,boss_reflection=spawn_entity("boss_health") -- ,nil,nil
-	-- -- show controls
-	-- if boss_phase==0 then
-	-- else
-	-- 	-- skip to certain phase of the fight (for debug purposes)
-	-- 	boss=spawn_entity("magic_mirror")
-	-- 	boss.visible,boss_health.visible=true,true
-	-- 	if boss_phase>1 then
-	-- 		boss:set_expression(1)
-	-- 		boss.is_wearing_top_hat=true
-	-- 		boss.right_hand:appear()
-	-- 		boss.left_hand:appear()
-	-- 	end
-	-- 	if boss_phase>3 then
-	-- 		player_reflection=spawn_entity("player_reflection")
-	-- 	end
-	-- 	boss_phase-=1
-	-- 	boss:promise_sequence(
-	-- 		"phase_change",
-	-- 		function()
-	-- 			boss_phase+=1
-	-- 		end,
-	-- 		"return_to_ready_position",
-	-- 		"decide_next_action")
-	-- end
-	-- immediately add new entities to the game
-	add_new_entities()
-end
-
-function update_game()
-	-- sort entities for updating
-	sort_list(entities,function(a,b)
-		return a.update_priority>b.update_priority
-	end)
-	-- update entities
-	local entity
-	for entity in all(entities) do
-		if not is_paused or entity.is_pause_immune then
-			-- call the entity's update function
-			entity:update()
-			-- do some default update stuff
-			decrement_counter_prop(entity,"invincibility_frames")
-			entity.frames_alive=increment_counter(entity.frames_alive)
-			if decrement_counter_prop(entity,"frames_to_death") then
-				entity:die()
+		-- update entities
+		local entity
+		for entity in all(entities) do
+			if not is_paused or entity.is_pause_immune then
+				-- call the entity's update function
+				if entity:update()!=false then
+					entity:apply_velocity()
+				end
+				-- do some default update stuff
+				decrement_counter_prop(entity,"invincibility_frames")
+				entity.frames_alive=increment_counter(entity.frames_alive)
+				if decrement_counter_prop(entity,"frames_to_death") then
+					entity:die()
+				end
 			end
 		end
-	end
-	-- check for hits
-	if not is_paused then
-		local i
-		for i=1,#entities do
-			local entity,j=entities[i]
-			for j=1,#entities do
-				local entity2=entities[j]
-				if i!=j and band(entity.hitbox_channel,entity2.hurtbox_channel)>0 and entity:is_hitting(entity2) then
-					entity:on_hit(entity2)
-					if entity2.invincibility_frames<=0 then
-						entity2:on_hurt(entity)
+		-- check for hits
+		if not is_paused then
+			for entity in all(entities) do
+				local entity2
+				for entity2 in all(entities) do
+					if entity!=entity2 and band(entity.hitbox_channel,entity2.hurtbox_channel)>0 and entity:is_hitting(entity2) then
+						entity:on_hit(entity2)
+						if entity2.invincibility_frames<=0 then
+							entity2:on_hurt(entity)
+						end
 					end
 				end
 			end
 		end
+		-- add new entities to the game
+		add_new_entities()
+		-- remove dead entities from the game
+		filter_out_finished(entities)
+		-- sort entities for rendering
+		local i
+		for i=1,#entities do
+			local j=i
+			while j>1 and is_rendered_on_top_of(entities[j-1],entities[j]) do
+				entities[j],entities[j-1]=entities[j-1],entities[j]
+				j-=1
+			end
+		end
 	end
-	-- add new entities to the game
-	add_new_entities()
-	-- remove dead entities from the game
-	filter_out_finished(entities)
-	-- sort entities for rendering
-	sort_list(entities,function(a,b)
-		return ternary(a.render_layer==b.render_layer,a:row()>b:row(),a.render_layer>b.render_layer)
-	end)
 end
 
-function draw_game()
+function _draw()
+	local shake_x,stars=0,{29,19,88,7,18,41,44,3,102,43,24,45,112,62,11,70,5,108,120,91,110,119}
+	-- clear the screen
+	cls()
 	-- shake the camera
-	local shake_x=0
 	if freeze_frames<=0 and screen_shake_frames>0 then
-		shake_x=ternary(boss_phase==5,1,ceil(screen_shake_frames/3))*(scene_frame%2*2-1)
+		shake_x=ternary(boss_phase==5,1,-flr(-screen_shake_frames/3))*(scene_frame%2*2-1)
 	end
 	-- draw the background
 	camera(shake_x,-11)
 	-- draw stars
-	local stars,i={29,19,88,7,18,41,44,3,102,43,24,45,112,62,11,70,5,108,120,91,110,119}
 	circ(18,41,1,1)
 	circ(112,62,1)
+	local i
 	for i=1,#stars,2 do
 		pset(stars[i],stars[i+1])
 	end
@@ -1727,9 +1616,6 @@ function draw_game()
 	end)
 	-- draw ui
 	camera(shake_x)
-	-- -- draw black boxes
-	-- rectfill(0,0,127,10,0)
-	-- rectfill(0,118,127,128)
 	if boss_phase>0 then
 		-- draw score multiplier
 		sspr2(72,45,11,7,6,2)
@@ -1738,10 +1624,6 @@ function draw_game()
 		local score_text=ternary(score>0,score.."00","0")
 		print(score_text,121-4*#score_text,3,1)
 	end
-	-- print("25700",101,3,1)
-	-- -- draw lives
-	-- sspr2(73,52,10,5,7,120)
-	-- print("3",19,120)
 	-- -- draw timer
 	-- print("17:03",101,120)
 	-- draw ui entities
@@ -1765,6 +1647,12 @@ function draw_game()
 	-- rect(47,119,79,125) -- bottom middle ui
 	-- line(63,0,63,127) -- mid line
 	-- line(127,0,127,127) -- unused right line
+	-- draw debug info
+	-- camera()
+	-- print("mem:      "..flr(100*(stat(0)/1024)).."%",2,102,ternary(stat(1)>=819,8,3))
+	-- print("cpu:      "..flr(100*stat(1)).."%",2,109,ternary(stat(1)>=0.8,8,3))
+	-- print("entities: "..#entities,2,116,ternary(#entities>120,8,3))
+	-- print("promises: "..#promises,2,123,ternary(#promises>30,8,3))
 end
 
 -- particle functions
@@ -1830,7 +1718,6 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			frames_to_death=0,
 			-- ordering props
 			render_layer=5,
-			update_priority=5,
 			-- hit props
 			hitbox_channel=0,
 			hurtbox_channel=0,
@@ -1842,13 +1729,7 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			vy=0,
 			-- entity methods
 			init=noop,
-			update=function(self)
-				self:apply_velocity()
-			end,
-			apply_velocity=function(self)
-				self.x+=self.vx
-				self.y+=self.vy
-			end,
+			update=noop,
 			draw=noop,
 			die=function(self)
 				if not self.finished then
@@ -1895,6 +1776,50 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			poof=function(self,dx,dy)
 				spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
 				return 12
+			end,
+			-- move methods
+			apply_velocity=function(self)
+				local move=self.movement
+				if move then
+					move.frames+=1
+					local t=move.easing(move.frames/move.duration)
+					local i
+					self.vx,self.vy=-self.x,-self.y
+					for i=0,3 do
+						local m=ternary(i%3>0,3,1)*t^i*(1-t)^(3-i)
+						self.vx+=m*move.bezier[2*i+1]
+						self.vy+=m*move.bezier[2*i+2]
+					end
+					if move.frames>=move.duration then
+						self.x,self.y,self.vx,self.vy,self.movement=move.final_x,move.final_y,0,0 -- ,nil
+					end
+				end
+				self.x+=self.vx
+				self.y+=self.vy
+			end,
+			move=function(self,x,y,dur,easing,anchors,is_relative)
+				local start_x,start_y,end_x,end_y=self.x,self.y,x,y
+				if is_relative then
+					end_x+=start_x
+					end_y+=start_y
+				end
+				local dx,dy=end_x-start_x,end_y-start_y
+				anchors=anchors or {dx/4,dy/4,-dx/4,-dy/4}
+				self.movement={
+					frames=0,
+					duration=dur,
+					final_x=end_x,
+					final_y=end_y,
+					easing=easing or linear,
+					bezier={start_x,start_y,
+						start_x+anchors[1],start_y+anchors[2],
+						end_x+anchors[3],end_y+anchors[4],
+						end_x,end_y}
+				}
+				return max(0,dur-1)
+			end,
+			cancel_move=function(self)
+				self.vx,self,vy,self.movement=0,0 -- ,nil
 			end
 		}
 	end
@@ -2048,13 +1973,8 @@ function make_promise(ctx,fn,...)
 end
 
 -- drawing functions
-function calc_rainbow_color()
-	local f=flr(scene_frame/4)%6
-	rainbow_color=8+f
-	if rainbow_color==13 then
-		rainbow_color=14
-	end
-	dark_rainbow_color=({2,4,9,3,13,8})[f+1]
+function is_rendered_on_top_of(a,b)
+	return ternary(a.render_layer==b.render_layer,a:row()>b:row(),a.render_layer>b.render_layer)
 end
 
 function sspr2(x,y,width,height,x2,y2,flip_horizontal,flip_vertical)
@@ -2095,18 +2015,9 @@ function ease_out_in(percent)
 	return ternary(percent<0.5,ease_out(2*percent)/2,0.5+ease_in(2*percent-1)/2)
 end
 
--- function ease_in_out(percent)
--- 	return ternary(percent<0.5,ease_in(2*percent)/2,0.5+ease_out(2*percent-1)/2)
--- end
-
 -- helper functions
 function freeze_and_shake_screen(f,s)
 	freeze_frames,screen_shake_frames=max(f,freeze_frames),max(s,screen_shake_frames)
-end
-
--- round a number up to the nearest integer
-function ceil(n)
-	return -flr(-n)
 end
 
 -- if condition is true return the second argument, otherwise the third
@@ -2150,18 +2061,6 @@ function decrement_counter_prop(obj,k)
 	if obj[k]>0 then
 		obj[k]=decrement_counter(obj[k])
 		return obj[k]<=0
-	end
-end
-
--- sorts list (inefficiently) based on func
-function sort_list(list,func)
-	local i
-	for i=1,#list do
-		local j=i
-		while j>1 and func(list[j-1],list[j]) do
-			list[j],list[j-1]=list[j-1],list[j]
-			j-=1
-		end
 	end
 end
 
