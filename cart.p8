@@ -10,8 +10,7 @@ cartdata("bridgs_justoneboss_1_test")
 --[[
 cart data:
 	0: high score
-	1: best time minutes
-	2: best time seconds
+	1: best time in seconds
 
 coordinates:
   +x is right, -x is left
@@ -50,7 +49,7 @@ function noop() end
 local starting_phase,skip_animations,one_hit_ko,one_hit_death=4,true,true,true
 
 -- global scene vars
-local scene_frame,freeze_frames,screen_shake_frames,is_paused=0,0,0 -- ,false
+local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,is_paused=0,0,0,0 -- ,false
 
 -- global game vars
 local rainbow_color,dark_rainbow_color,boss_phase,score,score_mult=8,2,0,0,1
@@ -137,7 +136,7 @@ local entity_classes={
 					27,
 					{"set_anim","open"},
 					function()
-						entities,new_entities,boss_phase,score,score_mult,is_paused={title_screen,curtains},{},max(0,starting_phase-1),0,1 -- ,false
+						entities,new_entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},{},max(0,starting_phase-1),0,1,0 -- ,false
 						player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health") -- ,nil,...
 						if starting_phase>0 then
 							boss=spawn_entity("magic_mirror")
@@ -171,11 +170,11 @@ local entity_classes={
 			print("person, you!",x-22.5,58)
 			-- print score
 			if self.show_score then
-				self:draw_score(x,73,"score:",score.."00","-:--")
+				self:draw_score(x,73,"score:",score.."00",format_timer(timer_seconds))
 			end
 			-- print best
 			if self.show_best then
-				self:draw_score(x,81,"best:",dget(0).."00","-:--",dget(0)<=score)
+				self:draw_score(x,81,"best:",dget(0).."00",format_timer(dget(1)),dget(0)<=score,dget(1)>=timer_seconds)
 			end
 			if self.frames_alive%30<22 and not self.is_activated then
 				print("press    to return",29,99,13)
@@ -190,6 +189,9 @@ local entity_classes={
 			elseif self.frames_alive==60 then
 				if score>=dget(0) then
 					dset(0,score)
+				end
+				if timer_seconds<=dget(1) or dget(1)==0 then
+					dset(1,timer_seconds)
 				end
 				self.show_best=true
 			end
@@ -1551,6 +1553,11 @@ function _update()
 			player:check_inputs()
 		end
 	else
+		-- update the timer
+		if scene_frame%30==0 and not is_paused and boss_phase>0 then
+			timer_seconds=min(5999,timer_seconds+1)
+		end
+		-- increment a bunch of counters
 		screen_shake_frames,scene_frame=decrement_counter(screen_shake_frames),increment_counter(scene_frame)
 		local num_promises,rainbow_frames=#promises,1+flr(scene_frame/4)%6
 		-- calculate rainbow colors
@@ -1657,11 +1664,11 @@ function _draw()
 		sspr2(72,45,11,7,6,2)
 		print(score_mult,8,3,0)
 		-- draw score
-		local score_text=ternary(score>0,score.."00","0")
+		local score_text,timer_text=ternary(score>0,score.."00","0"),format_timer(timer_seconds)
 		print(score_text,121-4*#score_text,3,1)
+		-- draw timer
+		print(timer_text,121-4*#timer_text,120)
 	end
-	-- -- draw timer
-	-- print("17:03",101,120)
 	-- draw ui entities
 	foreach(entities,function(entity)
 		if entity.render_layer>=13 then
@@ -2029,6 +2036,11 @@ function show_title_screen(movables)
 		function()
 			starting_phase,title_screen.is_activated=1 -- ,false
 		end)
+end
+
+function format_timer(seconds)
+	local timer_seconds=seconds%60
+	return flr(seconds/60)..ternary(timer_seconds<10,":0",":")..timer_seconds
 end
 
 -- drawing functions
