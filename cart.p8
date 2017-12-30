@@ -1,7 +1,18 @@
 pico-8 cartridge // http://www.pico-8.com
 version 8
 __lua__
+--just one boss
+--by bridgs
+
+-- set cart data (for saving and loading high scores)
+cartdata("bridgs_justoneboss_1_test")
+
 --[[
+cart data:
+	0: high score
+	1: best time minutes
+	2: best time seconds
+
 coordinates:
   +x is right, -x is left
   +y is down / towards the screen, -y is up / away from the screen
@@ -36,7 +47,7 @@ tokens:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_animations,one_hit_ko,one_hit_death=3,true,true,false
+local starting_phase,skip_animations,one_hit_ko,one_hit_death=4,true,true,true
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,is_paused=0,0,0 -- ,false
@@ -153,20 +164,56 @@ local entity_classes={
 		-- draw
 		function(self,x)
 			sspr2(47,102,81,26,x-40,15)
-			print("you did it!",x-21,41,15)
-			print("you beautiful",x-25,49)
-			print("person, you!",x-23,57)
+			sspr2(120,79,8,9,x-51,32)
+			sspr2(120,79,8,9,x+44,32,true)
+			print("you did it!",x-20.5,42,15)
+			print("you beautiful",x-24.5,50)
+			print("person, you!",x-22.5,58)
 			-- print score
-			self:draw_score(x,73,"score:","27100","5:45")
+			if self.show_score then
+				self:draw_score(x,73,"score:",score.."00","-:--")
+			end
 			-- print best
-			self:draw_score(x,81,"best:","27100","5:45")
+			if self.show_best then
+				self:draw_score(x,81,"best:",dget(0).."00","-:--",dget(0)<=score)
+			end
+			if self.frames_alive%30<22 and not self.is_activated then
+				print("press    to return",29,99,13)
+				print("to menu",49,107)
+				sspr2(88,12,8,7,52,98,true)
+			end
 		end,
+		-- update
+		function(self)
+			if self.frames_alive==30 then
+				self.show_score=true
+			elseif self.frames_alive==60 then
+				if score>=dget(0) then
+					dset(0,score)
+				end
+				self.show_best=true
+			end
+			if btnp(0) and not self.is_activated then
+				self.is_activated=true
+				show_title_screen({title_screen,self})
+			end
+		end,
+		is_pause_immune=true,
 		render_layer=18,
 		x=63,
-		draw_score=function(self,x,y,label_text,score_text,time_text)
-			print(label_text,x-42,y,7)
-			print(score_text,x+6-4*#score_text,y)
-			print(time_text,x+30-4*#time_text,y)
+		draw_score=function(self,x,y,label_text,score_text,time_text,show_score_bang,show_time_bang)
+			print(label_text,x-42.5,y,7)
+			print(score_text,x+9.5-4*#score_text,y)
+			print(time_text,x+45.5-4*#time_text,y)
+			sspr2(97,4,5,5,x+18,y)
+			if self.frames_alive%30<22 then
+				if show_score_bang then
+					print("!",x+9.5,y,9)
+				end
+				if show_time_bang then
+					print("!",x+45.5,y,9)
+				end
+			end
 		end
 	},
 	death_prompt={
@@ -182,16 +229,7 @@ local entity_classes={
 		function(self)
 			if self.frames_alive>120 and btnp(0) then
 				self:die()
-				local movables,movable={player_figment,player_health,title_screen}
-				for movable in all(movables) do
-					movable:move(127,0,100,ease_in_out,{-70,0,0,0},true)
-					movable.x-=2
-				end
-				title_screen:promise_sequence(
-					110,
-					function()
-						starting_phase,title_screen.is_activated=1 -- ,false
-					end)
+				show_title_screen({player_figment,player_health,title_screen})
 			end
 		end,
 		render_layer=17,
@@ -416,7 +454,7 @@ local entity_classes={
 				curtains:set_anim() -- close
 				player_health:promise_sequence(
 					30,
-					{"move",63,45,60,ease_in_out,{-60,10,-40,10}})
+					{"move",62.5,45,60,ease_in_out,{-60,10,-40,10}})
 				player:die()
 				player=nil
 			end
@@ -1980,6 +2018,19 @@ function make_promise(ctx,fn,...)
 	}
 end
 
+function show_title_screen(movables)
+	local movable
+	for movable in all(movables) do
+		movable:move(127,0,100,ease_in_out,{-70,0,0,0},true)
+		movable.x-=2
+	end
+	title_screen:promise_sequence(
+		110,
+		function()
+			starting_phase,title_screen.is_activated=1 -- ,false
+		end)
+end
+
 -- drawing functions
 function is_rendered_on_top_of(a,b)
 	return ternary(a.render_layer==b.render_layer,a:row()>b:row(),a.render_layer>b.render_layer)
@@ -2083,11 +2134,11 @@ __gfx__
 0000cccccccccccccccc0000000cccccc0000ccccccc0008dccccc000000000000000000ccc000000c0c0000000ccccccc000200055555650000000090f00000
 0000cccc1c1cccc1111c1c0000ccc11c10000cccc1c10000cccccc0000c11cccc000000cc1c00000ccccc00000cc11c11cc00200055555650000000090f00000
 0000cdcc1c1cddd1111c1c00cddcc11c10000dccc1c1000dcc1c1cc0ccc11111cc000ddcc1c00d0ccccccc00ddcccccccccdd200055555650000009094f09000
-0000cccccccccccccccccc000cccccccc0000ccccccc00ddcc1c1cc0ccddcccccc00000cccc000dcccc11c0d00ccccc002222200055555550000094499944900
-0000ddcccccddcdddd00000000ddccddc0000ddcccdc000ddccccc0ddccccccdd000000dccc000ccc1c11cd00ccccccc02222200055555550000009977799000
-0000ddddddddddd0000000000ddddddd0000dddddddd0000ddcccd0ddddddd000000000dddd00000ccccccc0dc11c11cd2222210088888880010097777777900
-00000d000d00d00000000000000000d00000000000d000000d0009800000d000000000d000d000dcccccc0000dcccccd022222555555555555509777777777f0
-000ccccc00000000c00000000ccccc000000ccccc000000ccccc000000000000000000000000000ddddddd000ccccccc022222055555555555009777777777f0
+0000cccccccccccccccccc000cccccccc0000ccccccc00ddcc1c1cc0ccddcccccc00000cccc000dcccc11c0d00ccccc000676000055555550000094499944900
+0000ddcccccddcdddd00000000ddccddc0000ddcccdc000ddccccc0ddccccccdd000000dccc000ccc1c11cd00ccccccc06070600055555550000009977799000
+0000ddddddddddd0000000000ddddddd0000dddddddd0000ddcccd0ddddddd000000000dddd00000ccccccc0dc11c11cd6077610088888880010097777777900
+00000d000d00d00000000000000000d00000000000d000000d0009800000d000000000d000d000dcccccc0000dcccccd060006555555555555509777777777f0
+000ccccc00000000c00000000ccccc000000ccccc000000ccccc000000000000000000000000000ddddddd000ccccccc006660055555555555009777777777f0
 00ccccccc000000ccc0000000ccccc00000ccccccc0090ccccccc090000000000000000000000000d000d0000dcccccd0222005555555555600977777777777f
 00ccccccc000000ccc000000ccccccc0000ccccccc000dcccccccd00d0000000d00d0000000d0101010101010ddddddd0222155511111115561977777777777f
 00dcccccd000000ccc000000ccccccc0000dcccccd0080cdddddc080dcccccccd00cdcccccdc00101010101000d000d002225511111111111659777777777779
