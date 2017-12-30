@@ -11,6 +11,8 @@ cartdata("bridgs_justoneboss_1_test")
 cart data:
 	0: high score
 	1: best time in seconds
+	2: high score - hard mode
+	3: best time in seconds - hard mode
 
 coordinates:
   +x is right, -x is left
@@ -46,7 +48,7 @@ tokens:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_animations,one_hit_ko,one_hit_death=4,true,true,true
+local starting_phase,skip_animations,one_hit_ko,one_hit_death=0,false,false,false
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,is_paused=0,0,0,0 -- ,false
@@ -174,7 +176,7 @@ local entity_classes={
 			end
 			-- print best
 			if self.show_best then
-				self:draw_score(x,81,"best:",dget(0).."00",format_timer(dget(1)),dget(0)<=score,dget(1)>=timer_seconds)
+				self:draw_score(x,81,"best:",dget(0).."00",format_timer(dget(1)),dget(0)==score,dget(1)==timer_seconds)
 			end
 			if self.frames_alive%30<22 and not self.is_activated then
 				print("press    to return",29,99,13)
@@ -1169,7 +1171,7 @@ local entity_classes={
 			-- raise the wands to cast a spell
 				function()
 					if upgraded_version then
-						promise:and_then(rh,"flourish_wand")
+						rh:flourish_wand()
 					end
 				end,
 				{lh,"flourish_wand"},
