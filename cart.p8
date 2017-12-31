@@ -9,10 +9,30 @@ cartdata("bridgs_justoneboss_1_test")
 
 --[[
 cart data:
-	0: high score
-	1: best time in seconds
-	2: high score - hard mode
-	3: best time in seconds - hard mode
+	0:	high score
+	1:	best time in seconds
+	2:	high score (hard mode)
+	3:	best time in seconds (hard mode)
+
+sounds:
+	0:	player teeter -> player step / boss bouquet appear / disappear
+	1:	menu advance / heart collect
+	2:	tile spawn
+	3:	tile collect -> tile particle connect (ten tones)
+	4:	poof
+	5:	boss static -> test screen -> static
+	6:	boss laser charge -> boss laser
+	7:	player hurt -> boss pound / boss reel explosion
+	8:	coin spawn
+	9:	coin pound (two pounds) -> player bump
+	10:	hand throw card
+	11:	flower spawn / hand grab handle
+	12:	flower bloom / boss cast spell
+	...	title screen music - fun, simple, loops
+	...	intro music - mysterious, slow, simple, loops
+	...	boss music - high-energy, fast-paced, loops
+	...	death jingle - sad, no loop
+	...	victory music - happy, high-energy, loops
 
 coordinates:
   +x is right, -x is left
@@ -29,19 +49,11 @@ coordinates:
 
 todo:
 	sound effects + music
-	timer
-	track high score
-	unlock hard mode
 	hard mode
-	victory screen
+	victory screen tweaks
 	gameplay tweaks
 	playtesting
 	credits
-
-tokens:
-	entity classes		6240
-	big three methods	546
-	all other methods	1355
 ]]
 
 -- useful noop function
@@ -126,6 +138,11 @@ local entity_classes={
 			if f%30<22 and not self.is_activated then
 				print("press    to begin",x-10,y+73,13)
 				sspr2(88,12,8,7,x+14,y+72)
+				pal(13,8)
+				-- if dget(0)>0 then
+				-- 	print("or    for hard mode",x-14,y+82)
+				-- 	sspr2(88,12,8,7,x-3,y+81,true)
+				-- end
 			end
 		end,
 		-- update
