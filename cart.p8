@@ -5,7 +5,7 @@ __lua__
 --by bridgs
 
 -- set cart data (for saving and loading high scores)
-cartdata("bridgs_justoneboss_2_test")
+cartdata("bridgs_justoneboss_3_test")
 
 --[[
 cart data:
@@ -68,7 +68,7 @@ function noop() end
 local starting_phase,skip_animations,one_hit_ko,one_hit_death=4,true,true,false
 
 -- global scene vars
-local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,is_paused=0,0,0,0 -- ,false
+local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,is_paused,hard_mode=0,0,0,0 -- ,false,false
 
 -- global game vars
 local rainbow_color,boss_phase,score,score_mult=8,0,0,1
@@ -147,7 +147,7 @@ local entity_classes={
 		check_for_activation=function(self)
 			if self.frames_alive>self.frames_until_active and btnp(1) and not self.is_activated then
 				self.is_activated=true
-				slide_left(self)
+				slide(self)
 				self:on_activated()
 			end
 		end,
@@ -156,25 +156,34 @@ local entity_classes={
 				text="press    to "..text
 				print_centered(text,self.x,99,13)
 				sspr2(47,84,8,7,self.x+24-2*#text,98)
-				pal(13,8)
+				return true
 			end
 		end,
 		on_activated=noop
 	},
 	title_screen={
 		-- draw
-		function(self,x,y,f)
-			sspr2(0,71,47,16,x-23,y)
-			sspr2(0,88,47,40,x-23,y+18)
-			self:draw_prompt("begin")
-			-- if dget(0)>0 then
-			-- 	print("or    for hard mode",x-14,y+82)
-			-- 	sspr2(88,12,8,7,x-3,y+81,true)
-			-- end
+		function(self,x)
+			sspr2(0,71,47,16,x-23,26)
+			sspr2(0,88,47,40,x-23,44)
+			-- hard mode prompt
+			if self:draw_prompt("begin") and dget(0)>0 then
+				pal(13,8)
+				print_centered("or    for hard mode",x,108)
+				sspr2(47,84,8,7,x-27,107,true)
+			end
+		end,
+		-- update
+		function(self)
+			self:check_for_activation()
+			if self.frames_alive>self.frames_until_active and btnp(0) and not self.is_activated then
+				self.is_activated,hard_mode=true,true
+				slide(self,-1)
+				self:on_activated()
+			end
 		end,
 		extends="screen",
-		frames_until_active=10,
-		y=26,
+		frames_until_active=25,
 		on_activated=function()
 			curtains:promise_sequence(
 				27,
@@ -206,7 +215,7 @@ local entity_classes={
 			print_centered("created with love",x,66,6)
 			print_centered("by bridgs",x,73,6)
 			print_centered("https://brid.gs",x,83,12)
-			sspr2(ternary(false,77,55),84,22,18,x-11,43)
+			sspr2(ternary(hard_mode,77,55),84,22,18,x-11,43)
 			self:draw_prompt("continue")
 		end,
 		extends="screen",
@@ -270,7 +279,7 @@ local entity_classes={
 		extends="screen",
 		frames_until_active=195,
 		on_activated=function(self)
-			slide_left(spawn_entity("credit_screen"))
+			slide(spawn_entity("credit_screen"))
 		end,
 		draw_score=function(self,x,y,label_text,score_text,time_text)
 			print(label_text,x-42.5,y,7)
@@ -287,8 +296,8 @@ local entity_classes={
 		extends="screen",
 		frames_until_active=120,
 		on_activated=function(self)
-			slide_left(player_health)
-			slide_left(player_figment)
+			slide(player_health)
+			slide(player_figment)
 			show_title_screen()
 		end
 	},
@@ -516,7 +525,7 @@ local entity_classes={
 		-- draw
 		function(self)
 			if self.visible then
-				rect(33,2,93,8,ternary(self.rainbow_frames>0,rainbow_color,5))
+				rect(33,2,93,8,ternary(self.rainbow_frames>0,rainbow_color,ternary(hard_mode,8,5)))
 				rectfill(33,2,mid(33,32+self.health,92),8)
 			end
 		end,
@@ -619,7 +628,7 @@ local entity_classes={
 	},
 	magic_tile={
 		-- draw
-		function(self,x,y,f,f2)
+		function(self,x,y)
 			pal(7,rainbow_color)
 			sspr2(55,38,9,7,x-4,y-3)
 		end,
@@ -1946,9 +1955,10 @@ function despawn_boss_entities(list)
 	end)
 end
 
-function slide_left(entity)
-	entity.x+=2
-	return entity:move(-127,0,100,ease_in_out,{70,0,0,0},true)
+function slide(entity,dir)
+	dir=dir or 1
+	entity.x+=dir*2
+	return entity:move(-dir*127,0,100,ease_in_out,{dir*70,0,0,0},true)
 end
 
 -- promise functions
@@ -2072,11 +2082,11 @@ end
 
 function show_title_screen()
 	title_screen.x=188
-	slide_left(title_screen)
+	slide(title_screen)
 	title_screen:promise_sequence(
 		110,
 		function()
-			starting_phase,title_screen.is_activated=1 -- ,false
+			starting_phase,title_screen.frames_alive,title_screen.is_activated,hard_mode=1,0 -- ,false,false
 		end)
 end
 
@@ -2227,11 +2237,11 @@ __gfx__
 00005000000005000008008008008008008000008000000008000000005800020000077777770000007700000000777700770000000070000000000000000000
 00000000000000000000000000000dddd00000666660000666d60022222222220000777777770000007770000077077700000000007700000000000000070000
 0000000000000000000000000000dddddd000666d77600d66d776027777777770000777777770000007770077770000000007000777700000000000000000000
-000000000000dd0000660000000dddddddd0666ddd77666dddd77627555555570007777777777000000000777777000000000000777700000000000007000007
-00660000000dddd000666600000dddddddd0666d66676666d6667627577777570007777777777000000000777777000000000070077700777000000000000000
-00006600000dddd000006666000dddddddd0666ddd666666ddd66627575557570007777770777000007700077777077077700000000000770000000000000000
-000000000000dd0000000066660dddddddd0d666d666dd6d6d6d6d27577777570000777700000000777770000000077077700000000007000000000000000000
-0000000000000000000000006600dddddd00dd66666dddd66666dd27555555570000777000000000777770077000077000707077000000000000000000000000
+000000000000dd0000660000000dddddddd0666ddd77666dddd77627111111170007777777777000000000777777000000000000777700000000000007000007
+00660000000dddd000666600000dddddddd0666d66676666d6667627177777170007777777777000000000777777000000000070077700777000000000000000
+00006600000dddd000006666000dddddddd0666ddd666666ddd66627171117170007777770777000007700077777077077700000000000770000000000000000
+000000000000dd0000000066660dddddddd0d666d666dd6d6d6d6d27177777170000777700000000777770000000077077700000000007000000000000000000
+0000000000000000000000006600dddddd00dd66666dddd66666dd27111111170000777000000000777770077000077000707077000000000000000000000000
 00000000000000000000000000000dddd0000d5ddddd00d5dddd5027777777770000000000000000077000077000000000000000000000000000000000000000
 000000000000000000000000000000000000005d5d50000555d50022222222222222222201111111110511111111155111111111500000000000000000000700
 00000000000000000000000000000000000000770000000000000070000007700000000011111111111115555555111155555551100000000000000000007000
