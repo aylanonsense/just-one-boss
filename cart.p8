@@ -68,7 +68,7 @@ function noop() end
 local starting_phase,skip_animations,one_hit_ko,one_hit_death=4,true,true,false
 
 -- global scene vars
-local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,is_paused,hard_mode=0,0,0,0 -- ,false,false
+local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,is_paused,hard_mode=0,0,0,0,0,1 -- ,false,false
 
 -- global game vars
 local rainbow_color,boss_phase,score,score_mult=8,0,0,1
@@ -145,10 +145,14 @@ local entity_classes={
 		is_pause_immune=true,
 		render_layer=18,
 		check_for_activation=function(self)
-			if self.frames_alive>self.frames_until_active and btnp(1) and not self.is_activated then
-				self.is_activated=true
-				slide(self)
-				self:on_activated()
+			if self.frames_alive>self.frames_until_active and not self.is_activated then
+				if btnp(1) then
+					self.is_activated=true
+					slide(self)
+					self:on_activated()
+				else
+					return true
+				end
 			end
 		end,
 		draw_prompt=function(self,text)
@@ -175,9 +179,8 @@ local entity_classes={
 		end,
 		-- update
 		function(self)
-			self:check_for_activation()
-			if self.frames_alive>self.frames_until_active and btnp(0) and not self.is_activated then
-				self.is_activated,hard_mode=true,true
+			if self:check_for_activation() and btnp(0) then
+				self.is_activated,hard_mode,score_data_index,time_data_index=true,true,2,3
 				slide(self,-1)
 				self:on_activated()
 			end
@@ -229,6 +232,10 @@ local entity_classes={
 		-- draw
 		function(self,x,y,f)
 			-- congratulations
+			if hard_mode then
+				pal(9,8)
+				pal(4,2)
+			end
 			sspr2(47,102,81,26,x-40,15)
 			-- ~ congratulations ~
 			-- sspr2(120,79,8,9,x-51,32)
@@ -246,16 +253,16 @@ local entity_classes={
 			end
 			-- print best
 			if self.show_best then
-				self:draw_score(x,81,"best:",dget(0).."00",format_timer(dget(1)))
+				self:draw_score(x,81,"best:",dget(score_data_index).."00",format_timer(dget(time_data_index)))
 			end
 			self:draw_prompt("continue")
 			if f>185 and f%30<22 and self.show_best then
 				-- show score bang
-				if dget(0)==score then
+				if dget(score_data_index)==score then
 					print("!",x+9.5,81,9)
 				end
 				-- show time bang
-				if dget(1)==timer_seconds then
+				if dget(time_data_index)==timer_seconds then
 					print("!",x+45.5,81,9)
 				end
 			end
@@ -266,11 +273,11 @@ local entity_classes={
 				score+=max(0,380-timer_seconds)
 				self.show_score=true
 			elseif self.frames_alive==150 then
-				if score>=dget(0) then
-					dset(0,score)
+				if score>=dget(score_data_index) then
+					dset(score_data_index,score)
 				end
-				if timer_seconds<=dget(1) or dget(1)==0 then
-					dset(1,timer_seconds)
+				if timer_seconds<=dget(time_data_index) or dget(time_data_index)==0 then
+					dset(time_data_index,timer_seconds)
 				end
 				self.show_best=true
 			end
@@ -563,12 +570,11 @@ local entity_classes={
 						self.health=0
 					-- kill the boss
 					elseif boss_phase==4 then
-						boss_phase=5
+						promises,boss_phase,boss_reflection={},5,boss_reflection:die()
 						local i
 						for i=1,17 do
 							spawn_magic_tile(20+13*i)
 						end
-						boss_reflection=boss_reflection:die()
 						boss:promise_sequence(
 							"cancel_everything",
 							{"reel",60},
@@ -2086,7 +2092,7 @@ function show_title_screen()
 	title_screen:promise_sequence(
 		110,
 		function()
-			starting_phase,title_screen.frames_alive,title_screen.is_activated,hard_mode=1,0 -- ,false,false
+			starting_phase,title_screen.frames_alive,score_data_index,time_data_index,title_screen.is_activated,hard_mode=1,0,0,1 -- ,false,false
 		end)
 end
 
