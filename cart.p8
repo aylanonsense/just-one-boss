@@ -67,13 +67,13 @@ todo:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_animations,one_hit_ko,one_hit_death=4,true,true,false
+local starting_phase,skip_animations,one_hit_ko,one_hit_death=3,true,false,false
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,is_paused=0,0,0,0 -- ,false
 
 -- global game vars
-local rainbow_color,dark_rainbow_color,boss_phase,score,score_mult=8,2,0,0,1
+local rainbow_color,boss_phase,score,score_mult=8,0,0,1
 
 -- global entity vars
 local promises,entities,new_entities={},{},{}
@@ -121,9 +121,8 @@ local entity_classes={
 		end,
 		is_pause_immune=true,
 		render_layer=14,
-		percent_closed=100,
+		-- percent_closed=100,
 		anim_frames=0,
-		dir=1,
 		draw_curtain=function(self,x,dir)
 			rectfill(x-10*dir,0,x+dir*.62*self.percent_closed,127,0)
 			local lines={0,94,5,70,11,34,21,20}
@@ -137,84 +136,101 @@ local entity_classes={
 			self.anim,self.anim_frames=anim,100
 		end
 	},
-	title_screen={
+	screen={
 		-- draw
-		function(self,x,y,f)
-			sspr2(0,71,47,16,x,y)
-			sspr2(0,88,47,40,x,y+18)
-			if f%30<22 and not self.is_activated then
-				print("press    to begin",x-10,y+73,13)
-				sspr2(88,12,8,7,x+14,y+72)
-				pal(13,8)
-				-- if dget(0)>0 then
-				-- 	print("or    for hard mode",x-14,y+82)
-				-- 	sspr2(88,12,8,7,x-3,y+81,true)
-				-- end
-			end
-		end,
+		noop,
 		-- update
 		function(self)
-			if btnp(1) and not self.is_activated then
-				self.is_activated=true
-				self.x+=2
-				self:move(-127,0,100,ease_in_out,{70,0,0,0},true)
-				curtains:promise_sequence(
-					27,
-					{"set_anim","open"},
-					function()
-						entities,new_entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},{},max(0,starting_phase-1),0,1,0 -- ,false
-						player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health") -- ,nil,...
-						if starting_phase>0 then
-							boss=spawn_entity("magic_mirror")
-							boss.visible,boss_health.visible=true,true
-							boss:promise_sequence(30,"intro")
-							if starting_phase>1 then
-								boss.is_wearing_top_hat=true
-							end
-							if starting_phase>3 then
-								player_reflection=spawn_entity("player_reflection")
-							end
-						else
-							spawn_magic_tile(180)
-						end
-					end)
-			end
-		end,
-		x=40,
-		y=26,
-		is_pause_immune=true,
-		render_layer=15
-	},
-	credit_screen={
-		-- draw
-		function(self,x)
-			print("thank you for playing!",x-44,28,rainbow_color)
-			print("created with love",x-34,55,6)
-			print("by bridgs",x-18,62,6)
-			print("https://brid.gs",x-30,72,12)
-			if self.frames_alive%30<22 then
-				print("press    to return",29,99,13)
-				print("to menu",49,107)
-				sspr2(88,12,8,7,52,98,true)
-			end
+			self:check_for_activation()
 		end,
 		x=63,
 		is_pause_immune=true,
 		render_layer=18,
+		check_for_activation=function(self)
+			if self.frames_alive>self.frames_until_active and btnp(1) and not self.is_activated then
+				self.is_activated=true
+				slide_left(self)
+				self:on_activated()
+			end
+		end,
+		draw_prompt=function(self,text)
+			if self.frames_alive%30<22 and self.frames_alive>self.frames_until_active and not self.is_activated then
+				text="press    to "..text
+				print_centered(text,self.x,99,13)
+				sspr2(47,84,8,7,self.x+24-2*#text,98)
+				pal(13,8)
+			end
+		end,
+		on_activated=noop
+	},
+	title_screen={
+		-- draw
+		function(self,x,y,f)
+			sspr2(0,71,47,16,x-23,y)
+			sspr2(0,88,47,40,x-23,y+18)
+			self:draw_prompt("begin")
+			-- if dget(0)>0 then
+			-- 	print("or    for hard mode",x-14,y+82)
+			-- 	sspr2(88,12,8,7,x-3,y+81,true)
+			-- end
+		end,
+		extends="screen",
+		frames_until_active=10,
+		y=26,
+		on_activated=function()
+			curtains:promise_sequence(
+				27,
+				{"set_anim","open"},
+				function()
+					entities,new_entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},{},max(0,starting_phase-1),0,1,0 -- ,false
+					player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health") -- ,nil,...
+					-- todo remove debug schtuff
+					if starting_phase>0 then
+						boss=spawn_entity("magic_mirror")
+						boss.visible,boss_health.visible=true,true
+						boss:promise_sequence(30,"intro")
+						if starting_phase>1 then
+							boss.is_wearing_top_hat=true
+						end
+						if starting_phase>3 then
+							player_reflection=spawn_entity("player_reflection")
+						end
+					else
+						spawn_magic_tile(180)
+					end
+				end)
+		end
+	},
+	credit_screen={
+		-- draw
+		function(self,x)
+			print_centered("thank you for playing!",x,28,rainbow_color)
+			print_centered("created with love",x,55,6)
+			print_centered("by bridgs",x,62,6)
+			print_centered("https://brid.gs",x,72,12)
+			self:draw_prompt("continue")
+		end,
+		extends="screen",
+		x=188,
+		frames_until_active=130,
+		on_activated=function(self)
+			show_title_screen()
+		end
 	},
 	victory_screen={
 		-- draw
 		function(self,x,y,f)
 			-- congratulations
 			sspr2(47,102,81,26,x-40,15)
-			sspr2(120,79,8,9,x-51,32)
-			sspr2(120,79,8,9,x+44,32,true)
+			-- ~ congratulations ~
+			-- sspr2(120,79,8,9,x-51,32)
+			-- sspr2(120,79,8,9,x+44,32,true)
 			if f>35 then
-				print("you did it!",x-20.5,42,15)
+				print_centered("you did it!",x,42,15)
 			end
 			if f>70 then
-				print("you beautiful",x-24.5,50)
-				print("person, you!",x-22.5,58)
+				print_centered("you beautiful",x,50)
+				print_centered("person, you!",x,58)
 			end
 			-- print score
 			if self.show_score then
@@ -224,21 +240,15 @@ local entity_classes={
 			if self.show_best then
 				self:draw_score(x,81,"best:",dget(0).."00",format_timer(dget(1)))
 			end
-			if f>185 and f%30<22 then
-				if not self.is_activated then
-					print("press    to return",29,99,13)
-					print("to menu",49,107)
-					sspr2(88,12,8,7,52,98,true)
+			self:draw_prompt("continue")
+			if f>185 and f%30<22 and self.show_best then
+				-- show score bang
+				if dget(0)==score then
+					print("!",x+9.5,81,9)
 				end
-				if self.show_best then
-					-- show score bang
-					if dget(0)==score then
-						print("!",x+9.5,81,9)
-					end
-					-- show time bang
-					if dget(1)==timer_seconds then
-						print("!",x+45.5,81,9)
-					end
+				-- show time bang
+				if dget(1)==timer_seconds then
+					print("!",x+45.5,81,9)
 				end
 			end
 		end,
@@ -255,48 +265,37 @@ local entity_classes={
 				end
 				self.show_best=true
 			end
-			if btnp(0) and not self.is_activated and self.frames_alive>195 then
-				self.is_activated=true
-				show_title_screen({title_screen,self})
-			end
+			self:check_for_activation()
 		end,
-		is_pause_immune=true,
-		render_layer=18,
-		x=63,
+		extends="screen",
+		frames_until_active=195,
+		on_activated=function(self)
+			slide_left(spawn_entity("credit_screen"))
+		end,
 		draw_score=function(self,x,y,label_text,score_text,time_text)
 			print(label_text,x-42.5,y,7)
 			print(score_text,x+9.5-4*#score_text,y)
 			print(time_text,x+45.5-4*#time_text,y)
-			sspr2(97,4,5,5,x+18,y)
+			sspr2(95,16,5,5,x+18,y)
 		end
 	},
-	death_prompt={
+	death_screen={
 		-- draw
 		function(self)
-			if self.frames_alive>120 and self.frames_alive%30<22 then
-				print("press    to return",29,99,13)
-				print("to menu",49,107)
-				sspr2(88,12,8,7,52,98,true)
-			end
+			self:draw_prompt("continue")
 		end,
-		-- update
-		function(self)
-			if self.frames_alive>120 and btnp(0) then
-				self:die()
-				show_title_screen({player_figment,player_health,title_screen})
-			end
-		end,
-		render_layer=17,
-		is_pause_immune=true
+		extends="screen",
+		frames_until_active=120,
+		on_activated=function(self)
+			slide_left(player_health)
+			slide_left(player_figment)
+			show_title_screen()
+		end
 	},
 	player_figment={
 		-- draw
 		function(self,x,y,f)
-			if f<120 then
-				sspr2(88,4,9,8,x-4,y-6)
-			else
-				sspr2(88,0,13,4,x-6,y-4)
-			end
+			sspr2(88,ternary(f<120,8,0),11,8,x-5,y-6)
 		end,
 		is_pause_immune=true,
 		render_layer=17
@@ -362,7 +361,7 @@ local entity_classes={
 				self.vx,self.vy=0,0
 				self:apply_step()
 				self:apply_velocity()
-				local col,row=self:col(),self:row()
+				local col,row,occupant=self:col(),self:row(),get_tile_occupant(self)
 				if self.prev_col!=col or self.prev_row!=row then
 					-- teeter off the edge of the earth if the player tries to move off the map
 					if col!=mid(1,col,8) or row!=mid(1,row,5) then
@@ -370,7 +369,6 @@ local entity_classes={
 						self.teeter_frames=11
 					end
 					-- bump into an obstacle or reflection
-					local occupant=get_tile_occupant(col,row)
 					if occupant or (player_reflection and (self.prev_col<5)!=(col<5)) then
 						self:bump()
 						if occupant then
@@ -499,19 +497,18 @@ local entity_classes={
 			if self.hearts>0 then
 				self.hearts-=1
 				self.anim,self.anim_frames="lose",20
-			end
-			if self.hearts<=0 then
-				promises,is_paused,player_health.render_layer={},true,16
-				freeze_and_shake_screen(35,0)
-				spawn_entity("death_prompt")
-				player_figment=spawn_entity("player_figment",player.x+23,player.y+65)
-				player_figment:promise("move",63,72,60,linear)
-				curtains:set_anim() -- close
-				player_health:promise_sequence(
-					30,
-					{"move",62.5,45,60,ease_in_out,{-60,10,-40,10}})
-				player:die()
-				player=nil
+				if self.hearts<=0 then
+					promises,is_paused,player_health.render_layer={},true,16
+					freeze_and_shake_screen(35,0)
+					spawn_entity("death_screen")
+					player_figment=spawn_entity("player_figment",player.x+23,player.y+65)
+					player_figment:promise("move",63,72,60,linear)
+					curtains:set_anim() -- close
+					player_health:promise_sequence(
+						30,
+						{"move",62.5,45,60,ease_in_out,{-60,10,-40,10}})
+					player=player:die()
+				end
 			end
 		end
 	},
@@ -542,6 +539,7 @@ local entity_classes={
 			if self.health<60 then
 				self.health,self.visible,self.rainbow_frames=mid(0,self.health+1,60),true,15
 				local health=self.health
+				-- intro stuff
 				if boss_phase==0 then
 					if health==25 then
 						boss=spawn_entity("magic_mirror")
@@ -551,10 +549,17 @@ local entity_classes={
 						boss:intro()
 					end
 				elseif health>=60 then
+					-- once the boss is dying, just reset health to 0
 					if boss_phase>=5 then
 						self.health=0
+					-- kill the boss
 					elseif boss_phase==4 then
 						boss_phase=5
+						local i
+						for i=1,17 do
+							spawn_magic_tile(20+13*i)
+						end
+						boss_reflection=boss_reflection:die()
 						boss:promise_sequence(
 							"cancel_everything",
 							{"reel",60},
@@ -568,22 +573,13 @@ local entity_classes={
 							end,
 							"die",
 							120,
-							function()
-								curtains:set_anim() -- close
-							end,
+							{curtains,"set_anim"}, -- close
 							100,
 							function()
 								is_paused=true
 								spawn_entity("victory_screen")
 							end)
-						boss_reflection:promise_sequence(
-							"cancel_everything",
-							{"reel",57},
-							"die")
-						local i
-						for i=1,18 do
-							spawn_magic_tile(20+13*i)
-						end
+					-- move to next phase
 					else
 						boss:promise_sequence(
 							"cancel_everything",
@@ -624,20 +620,12 @@ local entity_classes={
 	magic_tile={
 		-- draw
 		function(self,x,y,f,f2)
-			local tile_color,bg_color=rainbow_color,1
-			if f2>0 or f<4 then
-				tile_color,bg_color=7,7
-				if f2==mid(1,f2,2) then
-					tile_color,bg_color=6,6
-				end
-			end
-			pal(7,tile_color)
-			pal(5,bg_color)
+			pal(7,rainbow_color)
 			sspr2(55,38,9,7,x-4,y-3)
 		end,
 		-- update
 		function(self)
-			if get_tile_occupant(self:col(),self:row()) then
+			if get_tile_occupant(self) then
 				self:die()
 				spawn_magic_tile(10)
 			end
@@ -652,24 +640,26 @@ local entity_classes={
 			freeze_and_shake_screen(2,2)
 			self.hurtbox_channel,self.frames_to_death,score_mult=0,6,min(score_mult+1,8)
 			local health_change=ternary(one_hit_ko and boss_phase<5,60,ternary(boss_phase==0,12,8))
-			local particles,i=spawn_particle_burst(self.x,self.y,max(health_change,ternary(boss_phase>=5,15,30)),16,10)
+			local particles=spawn_particle_burst(self.x,self.y,max(health_change,ternary(boss_phase>=5,15,25)),16,10)
+			local i
 			for i=1,health_change do
 				-- shuffle
 				local j=rnd_int(i,#particles)
-				particles[i],particles[j]=particles[j],particles[i]
+				local p=particles[j]
+				particles[i],particles[j],p.frames_to_death=p,particles[i],300
 				-- move towards and fill the boss bar
-				particles[i].frames_to_death,particles[i].on_death=15+2*i,function()
-					boss_health:gain_health()
-					sfx(8,1)
-				end
-				particles[i]:promise_sequence(
+				p:promise_sequence(
 					7+2*i,
-					{"move",8+min(boss_health.health+i,60),-58,8,ease_out})
+					{"move",8+min(boss_health.health+i,60),-58,8,ease_out},
+					1,
+					function()
+						boss_health:gain_health()
+						sfx(8,1)
+					end,
+					"die")
 			end
 			on_magic_tile_picked_up(self,health_change)
 		end
-		-- 5*i --> 16 sound
-		-- x*i --> 3*i sound?
 	},
 	player_reflection={
 		extends="player",
@@ -683,8 +673,8 @@ local entity_classes={
 		update=function(self)
 			local prev_col,prev_row=self:col(),self:row()
 			self:copy_player()
-			local occupant=get_tile_occupant(self:col(),self:row())
-			if (prev_col!=self:col() or prev_row!=self:row()) and occupant  and player then
+			local occupant=get_tile_occupant(self)
+			if (prev_col!=self:col() or prev_row!=self:row()) and occupant and player then
 				player:bump()
 				self:copy_player()
 				occupant:get_bumped()
@@ -701,10 +691,12 @@ local entity_classes={
 		copy_player=function(self)
 			if player then
 				-- 0 = left, 1 = right, 2 = up, 3 = down
-				local mirrored_directions={1,0,2,3}
-				self.x,self.y,self.facing=80-player.x,player.y,mirrored_directions[player.facing+1]
-				self.step_frames,self.stun_frames,self.teeter_frames=player.step_frames,player.stun_frames,player.teeter_frames
-				self.bump_frames,self.invincibility_frames,self.frames_alive=player.bump_frames,player.invincibility_frames,player.frames_alive
+				local mirrored_directions,props={1,0,2,3},{"y","step_frames","stun_frames","teeter_frames","bump_frames","invincibility_frames","frames_alive"}
+				self.x,self.facing=80-player.x,mirrored_directions[player.facing+1]
+				local p
+				for p in all(props) do
+					self[p]=player[p]
+				end
 			end
 		end
 	},
@@ -732,13 +724,7 @@ local entity_classes={
 	flower_patch={
 		-- draw
 		function(self,x,y)
-			local sx=101
-			if self.hit_frames>0 then
-				sx=119
-			elseif self.frames_to_death>0 then
-				sx=110
-			end
-			sspr2(sx,71,9,8,x-4,y-4)
+			sspr2(ternary(self.hit_frames>0,119,ternary(self.frames_to_death>0,110,101)),71,9,8,x-4,y-4)
 		end,
 		-- update
 		function(self)
@@ -750,24 +736,17 @@ local entity_classes={
 		is_boss_generated=true,
 		hit_frames=0,
 		bloom=function(self)
-			self.frames_to_death,self.hit_frames,self.hitbox_channel=ternary(boss_phase==4,10,30),3,1
+			self.frames_to_death,self.hit_frames,self.hitbox_channel=ternary(boss_phase==4,10,30),4,1
 			spawn_petals(self.x,self.y,2,8)
 		end
 	},
 	coin={
 		-- draw
 		function(self,x,y,f)
-			if f<36 then
-				circfill(self.target_x,self.target_y,min(flr(f/7),4),2)
-			end
-			local sprite=0
-			if f>20 then
-				sprite=2
-			end
+			circfill(self.target_x,self.target_y-1,min(flr(f/7),4),2)
+			local sprite=ternary(f>20,2,0)+flr(f/3)%2
 			if f>=30 then
 				sprite=ternary(self.health<3,5,4)
-			else
-				sprite+=flr(f/3)%2
 			end
 			sspr(9*sprite,37,9,9,x-4,y-5)
 		end,
@@ -779,16 +758,12 @@ local entity_classes={
 				{"move",self.target_x+2,self.target_y,30,ease_out,{20,-30,10,-60}},
 				2,
 				function()
-					self.hitbox_channel=5 -- player, coin
-					self.occupies_tile=true
+					self.occupies_tile,self.hitbox_channel=true,5 -- player, coin
 					freeze_and_shake_screen(2,2)
 				end,
-				{"move",-1,-4,3,ease_in,nil,true},
-				2,
-				{"move",-1,4,3,ease_out,nil,true},
+				{"move",-2,0,8,ease_in_out,{0,-4,0,-4},true},
 				function()
-					self.hitbox_channel=1 -- player
-					self.hurtbox_channel=4 -- coin
+					self.hitbox_channel,self.hurtbox_channel=1,4 -- player / coin
 				end)
 		end,
 		get_bumped=function(self)
@@ -840,7 +815,7 @@ local entity_classes={
 					if not self.is_reflection then
 						color_wash(rainbow_color)
 						if expression>0 and boss_phase>0 then
-							pal(13,dark_rainbow_color)
+							pal(13,13)
 						end
 					elseif expression==0 then
 						color_wash(11)
@@ -922,8 +897,9 @@ local entity_classes={
 				"phase_change",
 				spawn_magic_tile,
 				function()
+					scene_frame,player_health.visible=0,true
 					boss_phase+=1
-					player_health.visible=true
+					-- music(0)
 				end,
 				{"return_to_ready_position",nil,"right"},
 				"decide_next_action")
@@ -1590,8 +1566,7 @@ local entity_classes={
 		-- draw
 		function(self,x,y)
 			pset(x,y,8)
-			local text="+"..self.points.."00"
-			print(text,x-2*#text,y,rainbow_color)
+			print_centered("+"..self.points.."00",x,y,rainbow_color)
 		end,
 		render_layer=10,
 		vy=-0.5,
@@ -1620,9 +1595,12 @@ function _update()
 		end
 		-- increment a bunch of counters
 		screen_shake_frames,scene_frame=decrement_counter(screen_shake_frames),increment_counter(scene_frame)
-		local num_promises,rainbow_frames=#promises,1+flr(scene_frame/4)%6
+		local num_promises=#promises
 		-- calculate rainbow colors
-		rainbow_color,dark_rainbow_color=({8,9,10,11,12,14})[rainbow_frames],({2,4,9,3,13,8})[rainbow_frames]
+		rainbow_color=flr(scene_frame/4)%6+8
+		if rainbow_color==13 then
+			rainbow_color=14
+		end
 		-- update promises
 		local i
 		for i=1,num_promises do
@@ -1968,6 +1946,11 @@ function despawn_boss_entities(list)
 	end)
 end
 
+function slide_left(entity)
+	entity.x+=2
+	return entity:move(-127,0,100,ease_in_out,{70,0,0,0},true)
+end
+
 -- promise functions
 function make_promise(ctx,fn,...)
 	local args={...}
@@ -2087,12 +2070,9 @@ function make_promise(ctx,fn,...)
 	}
 end
 
-function show_title_screen(movables)
-	local movable
-	for movable in all(movables) do
-		movable:move(127,0,100,ease_in_out,{-70,0,0,0},true)
-		movable.x-=2
-	end
+function show_title_screen()
+	title_screen.x=188
+	slide_left(title_screen)
 	title_screen:promise_sequence(
 		110,
 		function()
@@ -2106,6 +2086,10 @@ function format_timer(seconds)
 end
 
 -- drawing functions
+function print_centered(text,x,...)
+	print(text,x-2*#text,...)
+end
+
 function is_rendered_on_top_of(a,b)
 	return ternary(a.render_layer==b.render_layer,a:row()>b:row(),a.render_layer>b.render_layer)
 end
@@ -2122,11 +2106,11 @@ function color_wash(c)
 end
 
 -- tile functions
-function get_tile_occupant(col,row)
-	local entity
-	for entity in all(entities) do
-		if entity.occupies_tile and entity:col()==col and entity:row()==row then
-			return entity
+function get_tile_occupant(entity)
+	local entity2
+	for entity2 in all(entities) do
+		if entity2.occupies_tile and entity2:col()==entity:col() and entity2:row()==entity:row() then
+			return entity2
 		end
 	end
 end
@@ -2204,27 +2188,27 @@ end
 
 
 __gfx__
-00000ccccc00cc00000000000000cccc000000ccccc0000900cc00000000000000000000ccc000000c0000000000ccccc000020005555555000000000f000000
-0000cccccccccccccccc0000000cccccc0000ccccccc0008dccccc000000000000000000ccc000000c0c0000000ccccccc000200055555650000000090f00000
-0000cccc1c1cccc1111c1c0000ccc11c10000cccc1c10000cccccc0000c11cccc000000cc1c00000ccccc00000cc11c11cc00200055555650000000090f00000
-0000cdcc1c1cddd1111c1c00cddcc11c10000dccc1c1000dcc1c1cc0ccc11111cc000ddcc1c00d0ccccccc00ddcccccccccdd200055555650000009094f09000
-0000cccccccccccccccccc000cccccccc0000ccccccc00ddcc1c1cc0ccddcccccc00000cccc000dcccc11c0d00ccccc000676000055555550000094499944900
-0000ddcccccddcdddd00000000ddccddc0000ddcccdc000ddccccc0ddccccccdd000000dccc000ccc1c11cd00ccccccc06070600055555550000009977799000
-0000ddddddddddd0000000000ddddddd0000dddddddd0000ddcccd0ddddddd000000000dddd00000ccccccc0dc11c11cd6077610088888880010097777777900
-00000d000d00d00000000000000000d00000000000d000000d0009800000d000000000d000d000dcccccc0000dcccccd060006555555555555509777777777f0
-000ccccc00000000c00000000ccccc000000ccccc000000ccccc000000000000000000000000000ddddddd000ccccccc006660055555555555009777777777f0
-00ccccccc000000ccc0000000ccccc00000ccccccc0090ccccccc090000000000000000000000000d000d0000dcccccd0222005555555555600977777777777f
-00ccccccc000000ccc000000ccccccc0000ccccccc000dcccccccd00d0000000d00d0000000d0101010101010ddddddd0222155511111115561977777777777f
-00dcccccd000000ccc000000ccccccc0000dcccccd0080cdddddc080dcccccccd00cdcccccdc00101010101000d000d002225511111111111659777777777779
-00ccccccc00000ccccc00000dcccccd0000ccccccc0000ddddddd000dcccccccd00ccccccccc0000000000000000d00022225551111111115559777777777779
-00cdddddc00000dcccd00000dcdddcd0000cdddddc0000ddddddd000cdddddddc00ddddddddd0101010101010000dd0022225055551115555059777777777779
-00ddddddd00000dcccd00000ddddddd0000ddddddd00000ddddd0000ddddddddd0000ddddd00000000000000ddddddd022220088555555588009777777777779
-000d000d000000cdddc00000ddddddd00000000d00000000d00000000ddddddd00000d000d00000000000000dddddddd22220055888888855000977777777790
-0000000000000ddddddd0000000ddd0000000000000000000000000000000000000000000000000100001000ddddddd022220055555555555000977777777790
-0000000000000ddddddd00000000d000000000000000000000000000000000000000000000000222222222220000dd0022220055555555555000047777777400
-00000000000000d000d000000000d000000000000000000000000000000000000000000000000222222222220000d000222200555555555550009949777949f0
-00000000000000ccccc0000000000000000000000000000000000000000000000000000000000222222222222222222222220005555555550000944999994490
-0000000000000ccccccc0000000c0000000000000000000000000000000000000000000000000222222222222222222222220000055555000000099494949900
+00000ccccc00cc00000000000000cccc000000ccccc0000900cc00000000000000000000ccc000000c000000000000000002220005555555000000000f000000
+0000cccccccccccccccc0000000cccccc0000ccccccc0008dccccc000000000000000000ccc000000c0c00000000000000022200055555650000000090f00000
+0000cccc1c1cccc1111c1c0000ccc11c10000cccc1c10000cccccc0000c11cccc000000cc1c00000ccccc0000000000000022200055555650000000090f00000
+0000cdcc1c1cddd1111c1c00cddcc11c10000dccc1c1000dcc1c1cc0ccc11111cc000ddcc1c00d0ccccccc000000000000022200055555650000009094f09000
+0000cccccccccccccccccc000cccccccc0000ccccccc00ddcc1c1cc0ccddcccccc00000cccc000dcccc11c0d000ccccc00022200055555550000094499944900
+0000ddcccccddcdddd00000000ddccddc0000ddcccdc000ddccccc0ddccccccdd000000dccc000ccc1c11cd000ccccccc0022200055555550000009977799000
+0000ddddddddddd0000000000ddddddd0000dddddddd0000ddcccd0ddddddd000000000dddd00000ccccccc00cc11c11cc022210088888880010097777777900
+00000d000d00d00000000000000000d00000000000d000000d0009800000d000000000d000d000dcccccc000dcccccccccd222555555555555509777777777f0
+000ccccc00000000c00000000ccccc000000ccccc000000ccccc000000000000000000000000000ddddddd00000ccccc000222055555555555009777777777f0
+00ccccccc000000ccc0000000ccccc00000ccccccc0090ccccccc090000000000000000000000000d000d00000ccccccc002005555555555600977777777777f
+00ccccccc000000ccc000000ccccccc0000ccccccc000dcccccccd00d0000000d00d0000000d0101010101010dc11c11cd02155511111115561977777777777f
+00dcccccd000000ccc000000ccccccc0000dcccccd0080cdddddc080dcccccccd00cdcccccdc00101010101000dcccccd0025511111111111659777777777779
+00ccccccc00000ccccc00000dcccccd0000ccccccc0000ddddddd000dcccccccd00ccccccccc00000000000000ccccccc0025551111111115559777777777779
+00cdddddc00000dcccd00000dcdddcd0000cdddddc0000ddddddd000cdddddddc00ddddddddd01010101010100dcccccd0025055551115555059777777777779
+00ddddddd00000dcccd00000ddddddd0000ddddddd00000ddddd0000ddddddddd0000ddddd0000000000000000ddddddd0020088555555588009777777777779
+000d000d000000cdddc00000ddddddd00000000d00000000d00000000ddddddd00000d000d00000000000000000d000d00020055888888855000977777777790
+0000000000000ddddddd0000000ddd00000000000000000000000000000000000000000000000001000010002222222067600055555555555000977777777790
+0000000000000ddddddd00000000d000000000000000000000000000000000000000000000000222222222222222222607060055555555555000047777777400
+00000000000000d000d000000000d0000000000000000000000000000000000000000000000002222222222222222226077600555555555550009949777949f0
+00000000000000ccccc0000000000000000000000000000000000000000000000000000000000222222222222222222600060005555555550000944999994490
+0000000000000ccccccc0000000c0000000000000000000000000000000000000000000000000222222222222222222066600000055555000000099494949900
 0000000000000cc1c1cc000000cc0c00000000000000000000000000000000000000000000000000006000000000000000000600000000000000000094900000
 000ccccc000000c1c1c000000ccccc000000ccccc000000000000000000ccc000000000000000000077700000000000000007770000006777760000099900000
 00ccccccc00000c1c1d00000cc1c1cc0000ccccccc00000ccccc000000c1c1c00000000000000000775770006777777600077777000007577770000009000000
@@ -2243,11 +2227,11 @@ __gfx__
 00005000000005000008008008008008008000008000000008000000005800020000077777770000007700000000777700770000000070000000000000000000
 00000000000000000000000000000dddd00000666660000666d60022222222220000777777770000007770000077077700000000007700000000000000070000
 0000000000000000000000000000dddddd000666d77600d66d776027777777770000777777770000007770077770000000007000777700000000000000000000
-000000000000dd0000660000000dddddddd0666ddd77666dddd77627555555570007777777777000000000777777000000000000777700000000000007000007
-00660000000dddd000666600000dddddddd0666d66676666d6667627577777570007777777777000000000777777000000000070077700777000000000000000
-00006600000dddd000006666000dddddddd0666ddd666666ddd66627575557570007777770777000007700077777077077700000000000770000000000000000
-000000000000dd0000000066660dddddddd0d666d666dd6d6d6d6d27577777570000777700000000777770000000077077700000000007000000000000000000
-0000000000000000000000006600dddddd00dd66666dddd66666dd27555555570000777000000000777770077000077000707077000000000000000000000000
+000000000000dd0000660000000dddddddd0666ddd77666dddd77627111111170007777777777000000000777777000000000000777700000000000007000007
+00660000000dddd000666600000dddddddd0666d66676666d6667627177777170007777777777000000000777777000000000070077700777000000000000000
+00006600000dddd000006666000dddddddd0666ddd666666ddd66627171117170007777770777000007700077777077077700000000000770000000000000000
+000000000000dd0000000066660dddddddd0d666d666dd6d6d6d6d27177777170000777700000000777770000000077077700000000007000000000000000000
+0000000000000000000000006600dddddd00dd66666dddd66666dd27111111170000777000000000777770077000077000707077000000000000000000000000
 00000000000000000000000000000dddd0000d5ddddd00d5dddd5027777777770000000000000000077000077000000000000000000000000000000000000000
 000000000000000000000000000000000000005d5d50000555d50022222222222222222201111111110511111111155111111111500000000000000000000700
 00000000000000000000000000000000000000770000000000000070000007700000000011111111111115555555111155555551100000000000000000007000
@@ -2288,13 +2272,13 @@ __gfx__
 66660006060060600000006066660006060000006060000ff07700f9777772222222222222222222222222222222222222222222222222000330000200999949
 6606000606006060000000606606000066600000606000000000000f997772222222222222222222222222222222222222222222222222000330000200000999
 60000006060060600000006060000000066000006060000000000000ff0772222222222222222222222222222222222222222222222222000310000200000099
-60000006660060600000006066000000066000006060000222222222222222222222222222222222222222222222222222222222222222000130000204444990
-0d000dddd0000ddd00000d00ddd00000ddd00000d0d0000222222222222222222222222222222222222222222222222222222222222222000130000244400000
-00dddddd000000ddddddd0000ddddddddd00000ddddd000222222222222222222222222222222222222222222222222222222222222222000130000244000000
-22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222204000000
-00006666666000006666600000066000666666666666666222222222222222222222222222222222222222222222222222222222222222222222222222222222
-00066600000600000666600000666600606660000000066222222222222222222222222222222222222222222222222222222222222222222222222222222222
-00666000000060000666660000606600606600000000066222222222222222222222222222222222222222222222222222222222222222222222222222222222
+600000066600606000000060660000000660000060600000000d0002222222222222222222222222222222222222222222222222222222000130000204444990
+0d000dddd0000ddd00000d00ddd00000ddd00000d0d00000000dd002222222222222222222222222222222222222222222222222222222000130000244400000
+00dddddd000000ddddddd0000ddddddddd00000ddddd000ddddddd02222222222222222222222222222222222222222222222222222222000130000244000000
+22222222222222222222222222222222222222222222222dddddddd2222222222222222222222222222222222222222222222222222222222222222204000000
+00006666666000006666600000066000666666666666666ddddddd02222222222222222222222222222222222222222222222222222222222222222222222222
+000666000006000006666000006666006066600000000660000dd002222222222222222222222222222222222222222222222222222222222222222222222222
+006660000000600006666600006066006066000000000660000d0002222222222222222222222222222222222222222222222222222222222222222222222222
 06066000000066000660660000000600606600000000660222222222222222222222222222222222222222222222222222222222222222222222222222222222
 06060000000066000660666000000600606600000000066222222222222222222222222222222222222222222222222222222222222222222222222222222222
 06060000000006000666066000000600606600000000000222222222222222222222222222222222222222222222222222222222222222222222222222222222
@@ -2384,9 +2368,9 @@ __sfx__
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 010500000963009621096110961109601096010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 010b0000095110951109111091210c1311213115131182312125121241212512124121251212311e1111811115511002000020000200002000020000200002000020000200002000020000200002000020000200
-001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010a00001525515225152250c205156350c205152250c205152550c2051522515225156350c205152250c205152550c20515225156151561515635152250c20515255156051560515605156350c2051522515205
+010c0000092450c2250922009201096350c213092250c203092450c2050c22509225096350c203092250c205092450c20509225096150961509635092250c2030c2400c2130c20315605096350c2050922515205
+010c0000092450c2250922009201096350c213092250c203092450c2050c22509225096350c203092250c205092450c20509225096050962509645092250c2030c2400c2130c20315605096350c2050922515205
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -2435,7 +2419,7 @@ __sfx__
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __music__
-00 41424344
+03 10424344
 00 41424344
 00 41424344
 00 41424344
