@@ -148,8 +148,7 @@ local entity_classes={
 			if self.frames_alive>self.frames_until_active and not self.is_activated then
 				if btnp(1) then
 					self.is_activated=true
-					slide(self)
-					self:on_activated()
+					slide(self):on_activated()
 				else
 					return true
 				end
@@ -181,8 +180,7 @@ local entity_classes={
 		function(self)
 			if self:check_for_activation() and btnp(0) then
 				self.is_activated,hard_mode,score_data_index,time_data_index=true,true,2,3
-				slide(self,-1)
-				self:on_activated()
+				slide(self,-1):on_activated()
 			end
 		end,
 		extends="screen",
@@ -393,7 +391,7 @@ local entity_classes={
 					end
 				end
 			end
-			return false
+			return true
 		end,
 		hitbox_channel=2, -- pickup
 		hurtbox_channel=1, -- player
@@ -516,7 +514,7 @@ local entity_classes={
 					freeze_and_shake_screen(35,0)
 					spawn_entity("death_screen")
 					player_figment=spawn_entity("player_figment",player.x+23,player.y+65)
-					player_figment:promise("move",63,72,60,linear)
+					player_figment:promise("move",63,72,60)
 					curtains:set_anim() -- close
 					player_health:promise_sequence(
 						30,
@@ -627,7 +625,7 @@ local entity_classes={
 		on_death=function(self)
 			freeze_and_shake_screen(0,1)
 			spawn_entity("magic_tile",self)
-			spawn_particle_burst(self.x,self.y,4,16,4)
+			spawn_particle_burst(self,0,4,16,4)
 		end
 	},
 	magic_tile={
@@ -653,7 +651,7 @@ local entity_classes={
 			freeze_and_shake_screen(2,2)
 			self.hurtbox_channel,self.frames_to_death,score_mult=0,6,min(score_mult+1,8)
 			local health_change=ternary(boss_phase==0,12,7)
-			local particles=spawn_particle_burst(self.x,self.y,max(health_change,ternary(boss_phase>=5,15,25)),16,10)
+			local particles=spawn_particle_burst(self,0,max(health_change,ternary(boss_phase>=5,15,25)),16,10)
 			local i
 			for i=1,health_change do
 				-- shuffle
@@ -671,7 +669,10 @@ local entity_classes={
 					end,
 					"die")
 			end
-			on_magic_tile_picked_up(self,health_change)
+			-- on magic tile picked up
+			if health_change+boss_health.health<60 and boss_phase<5 then
+				spawn_magic_tile(ternary(boss_phase<1,80,120)-min(self.frames_alive,20)) -- 20 frame grace period
+			end
 		end
 	},
 	player_reflection={
@@ -692,7 +693,7 @@ local entity_classes={
 				self:copy_player()
 				occupant:get_bumped()
 			end
-			return false
+			return true
 		end,
 		on_hurt=function(self,entity)
 			if player then
@@ -797,7 +798,7 @@ local entity_classes={
 			end
 		end,
 		on_death=function(self)
-			spawn_particle_burst(self.x,self.y,6,6,4)
+			spawn_particle_burst(self,0,6,6,4)
 		end
 	},
 	particle={
@@ -881,7 +882,7 @@ local entity_classes={
 					frames_to_death=18
 				}):move(x,y,20,ease_out)
 			end
-			return false
+			return true
 		end,
 		render_layer=7,
 		x=40,
@@ -1140,7 +1141,7 @@ local entity_classes={
 			if boss_phase==3 then
 				self.is_cracked=true
 			end
-			-- spawn_particle_burst(self.x,self.y,20,7,10)
+			-- spawn_particle_burst(self,0,20,7,10)
 			return self:promise_sequence(
 				{"set_expression",8},
 				"set_all_idle")
@@ -1418,7 +1419,7 @@ local entity_classes={
 			if self.is_holding_mirror then
 				self.idle_x,self.idle_y,self.x,self.y=m.idle_x,m.idle_y,m.x+2*self.dir,m.y+13
 			end
-			return false
+			return true
 		end,
 		-- is_right_hand,dir
 		-- is_holding_bouquet=false,
@@ -1466,7 +1467,7 @@ local entity_classes={
 				{"move",40+20*self.dir,-30,12,ease_out,{-20,20,0,20}},
 				{"set_pose",6},
 				function()
-					spawn_particle_burst(self.x,self.y-20,20,3,10)
+					spawn_particle_burst(self,20,20,3,10)
 					freeze_and_shake_screen(0,20)
 				end)
 		end,
@@ -1564,7 +1565,7 @@ local entity_classes={
 		on_hurt=function(self)
 			freeze_and_shake_screen(2,0)
 			player_health:gain_heart()
-			spawn_particle_burst(self.x,self.y,6,8,4)
+			spawn_particle_burst(self,0,6,8,4)
 			self:die()
 		end
 	},
@@ -1631,7 +1632,9 @@ function _update()
 		-- update promises
 		local i
 		for i=1,num_promises do
-			promises[i]:update()
+			if decrement_counter_prop(promises[i],"frames_to_finish") then
+				promises[i]:finish()
+			end
 		end
 		filter_out_finished(promises)
 		-- update entities
@@ -1639,7 +1642,7 @@ function _update()
 		for entity in all(entities) do
 			if not is_paused or entity.is_pause_immune then
 				-- call the entity's update function
-				if entity:update()!=false then
+				if not entity:update() then
 					entity:apply_velocity()
 				end
 				-- do some default update stuff
@@ -1683,7 +1686,7 @@ function _update()
 end
 
 function _draw()
-	local shake_x,i=0,0
+	local shake_x,i,score_text=0,0,score.."00"
 	-- clear the screen
 	cls()
 	-- shake the camera
@@ -1718,7 +1721,6 @@ function _draw()
 		sspr2(72,45,11,7,6,2)
 		print(score_mult,8,3,0)
 		-- draw score
-		local score_text=score.."00"
 		print(score_text,121-4*#score_text,3,1)
 		-- draw timer
 		print(format_timer(timer_seconds),7,120)
@@ -1751,11 +1753,12 @@ function _draw()
 end
 
 -- particle functions
-function spawn_particle_burst(x,y,num_particles,color,speed)
-	local particles,i={}
+function spawn_particle_burst(source,dy,num_particles,color,speed)
+	local particles={}
+	local i
 	for i=1,num_particles do
 		local angle,particle_speed=(i+rnd(0.7))/num_particles,speed*(0.5+rnd(0.7))
-		add(particles,spawn_entity("particle",x,y,{
+		add(particles,spawn_entity("particle",source.x,source.y-dy,{
 			vx=particle_speed*cos(angle),
 			vy=particle_speed*sin(angle)-speed/2,
 			color=color,
@@ -1791,20 +1794,14 @@ function spawn_magic_tile(frames_to_death)
 	})
 end
 
-function on_magic_tile_picked_up(tile,health)
-	health+=boss_health.health
-	if health<60 and boss_phase<5 then
-		spawn_magic_tile(ternary(boss_phase<1,80,120)-min(tile.frames_alive,30)) -- 30 frame grace period
-	end
-end
-
 -- entity functions
 function spawn_entity(class_name,x,y,args,skip_init)
 	if type(x)=="table" then
 		x,y=x.x,x.y
 	end
 	local k,v,entity
-	local super_class_name=entity_classes[class_name].extends
+	local the_class=entity_classes[class_name]
+	local super_class_name=the_class.extends
 	if super_class_name then
 		entity=spawn_entity(super_class_name,x,y,args,true)
 	else
@@ -1838,9 +1835,6 @@ function spawn_entity(class_name,x,y,args,skip_init)
 					self:on_death()
 					self.finished=true
 				end
-			end,
-			despawn=function(self)
-				self.finished=true
 			end,
 			on_death=noop,
 			col=function(self)
@@ -1926,11 +1920,10 @@ function spawn_entity(class_name,x,y,args,skip_init)
 		}
 	end
 	-- add class properties/methods onto it
-	for k,v in pairs(entity_classes[class_name]) do
+	for k,v in pairs(the_class) do
 		entity[k]=v
 	end
-	entity.update,entity.draw=entity_classes[class_name][2] or entity.update,entity_classes[class_name][1] or entity.draw
-	entity.class_name=class_name
+	entity.update,entity.draw,entity.class_name=the_class[2] or entity.update,the_class[1] or entity.draw,class_name
 	-- add properties onto it from the arguments
 	for k,v in pairs(args or {}) do
 		entity[k]=v
@@ -1948,7 +1941,7 @@ end
 function despawn_boss_entities(list)
 	foreach(list,function(entity)
 		if entity.is_boss_generated then
-			entity:despawn()
+			entity.finished=true
 		end
 	end)
 end
@@ -1956,7 +1949,8 @@ end
 function slide(entity,dir)
 	dir=dir or 1
 	entity.x+=dir*2
-	return entity:move(-dir*127,0,100,ease_in_out,{dir*70,0,0,0},true)
+	entity:move(-dir*127,0,100,ease_in_out,{dir*70,0,0,0},true)
+	return entity
 end
 
 -- promise functions
@@ -1990,13 +1984,8 @@ function make_promise(ctx,fn,...)
 			end
 			return self
 		end,
-		update=function(self)
-			if decrement_counter_prop(self,"frames_to_finish") then
-				self:finish()
-			end
-		end,
 		finish=function(self)
-			if not self.finished and not self.canceled then
+			if not self.finished then
 				self.finished=true
 				foreach(self.and_thens,function(promise)
 					promise:start()
@@ -2080,8 +2069,7 @@ end
 
 function show_title_screen()
 	title_screen.x=188
-	slide(title_screen)
-	title_screen:promise_sequence(
+	slide(title_screen):promise_sequence(
 		110,
 		function()
 			starting_phase,title_screen.frames_alive,score_data_index,time_data_index,title_screen.is_activated,hard_mode=1,0,0,1 -- ,false,false
@@ -2089,8 +2077,7 @@ function show_title_screen()
 end
 
 function format_timer(seconds)
-	local timer_seconds=seconds%60
-	return flr(seconds/60)..ternary(timer_seconds<10,":0",":")..timer_seconds
+	return flr(seconds/60)..ternary(seconds%60<10,":0",":")..seconds%60
 end
 
 -- drawing functions
