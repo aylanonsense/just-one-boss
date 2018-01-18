@@ -69,7 +69,7 @@ tokens:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_animations=2,true
+local starting_phase,skip_animations=0,false
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=0,0,0,0,0,1,8,0,0,1 -- ,false,false
@@ -81,8 +81,8 @@ local promises,new_entities,entities,title_screen,player,player_health,player_re
 local entity_classes={
 	top_hat={
 		-- draw
-		function(self,x,y)
-			sspr2(100,9,15,12,x-8,y-1)
+		function(self)
+			self:draw_sprite(8,1,100,9,15,12)
 		end,
 		-- update
 		function(self)
@@ -94,8 +94,8 @@ local entity_classes={
 	},
 	bunny={
 		-- draw
-		function(self,x,y)
-			sspr2(47,71,14,13,x-7,y-7,self.vx>0)
+		function(self)
+			self:draw_sprite(7,7,87,67,14,12,self.vx>0)
 		end,
 		-- update
 		function(self)
@@ -158,7 +158,7 @@ local entity_classes={
 			if self.frames_alive%30<22 and self.frames_alive>self.frames_until_active and not self.is_activated then
 				text="press    to "..text
 				print_centered(text,self.x,99,13)
-				sspr2(47,84,8,7,self.x+24-2*#text,98)
+				self:draw_sprite(44-2*#text,-98,119,83,8,7)
 				return true
 			end
 		end,
@@ -167,13 +167,13 @@ local entity_classes={
 	title_screen={
 		-- draw
 		function(self,x)
-			sspr2(0,71,47,16,x-23,26)
-			sspr2(0,88,47,40,x-23,44)
+			self:draw_sprite(23,-26,0,71,47,16)
+			self:draw_sprite(23,-44,0,88,47,40)
 			-- hard mode prompt
 			if self:draw_prompt("begin") and dget(0)>0 then
 				pal(13,8)
 				print_centered("or    for hard mode",x,108)
-				sspr2(47,84,8,7,x-27,107,true)
+				self:draw_sprite(27,-107,119,83,8,7,true)
 			end
 		end,
 		-- update
@@ -216,7 +216,7 @@ local entity_classes={
 			print_centered("created with love",x,66,6)
 			print_centered("by bridgs",x,73,6)
 			print_centered("https://brid.gs",x,83,12)
-			sspr2(ternary(hard_mode,77,55),84,22,18,x-11,43)
+			self:draw_sprite(11,-43,ternary(hard_mode,70,48),80,22,16)
 			self:draw_prompt("continue")
 		end,
 		extends="screen",
@@ -234,10 +234,7 @@ local entity_classes={
 				pal(9,8)
 				pal(4,2)
 			end
-			sspr2(47,102,81,26,x-40,15)
-			-- ~ congratulations ~
-			-- sspr2(120,79,8,9,x-51,32)
-			-- sspr2(120,79,8,9,x+44,32,true)
+			self:draw_sprite(40,-15,47,102,81,26)
 			if f>35 then
 				print_centered("you did it!",x,41,15)
 			end
@@ -290,7 +287,7 @@ local entity_classes={
 			print(label_text,x-42.5,y,7)
 			print(score_text,x+9.5-4*#score_text,y)
 			print(time_text,x+45.5-4*#time_text,y)
-			sspr2(95,16,5,5,x+18,y)
+			draw_sprite(x+18,y,95,16,5,5)
 		end
 	},
 	death_screen={
@@ -309,14 +306,14 @@ local entity_classes={
 	player_figment={
 		-- draw
 		function(self,x,y,f)
-			sspr2(88,ternary(f<120,8,0),11,8,x-5,y-6)
+			self:draw_sprite(5,6,88,ternary(f<120,8,0),11,8)
 		end,
 		is_pause_immune=true,
 		render_layer=17
 	},
 	player={
 		-- draw
-		function(self,x,y)
+		function(self)
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
 				local sx,sy,sh,dx,dy,facing,flipped=0,0,8,3+4*self.facing,6,self.facing,self.facing==0
 				-- up/down sprites are below the left/right sprites in the spritesheet
@@ -355,7 +352,7 @@ local entity_classes={
 				pal(12,self.primary_color)
 				pal(13,self.secondary_color)
 				pal(1,self.tertiary_color)
-				sspr2(sx,sy,11,sh,x-dx,y-dy,flipped)
+				self:draw_sprite(dx,dy,sx,sy,11,sh,flipped)
 			end
 		end,
 		-- update
@@ -467,11 +464,11 @@ local entity_classes={
 	},
 	player_health={
 		-- draw
-		function(self,x,y)
+		function(self)
 			if self.visible then
 				local i
 				for i=1,4 do
-					sspr2(0,30,9,7,x+8*i-24,y-3)
+					self:draw_sprite(24-8*i,3,0,30,9,7)
 					local sprite=0
 					if self.anim=="gain" and i==self.hearts then
 						sprite=mid(1,5-flr(self.anim_frames/2),3)
@@ -481,7 +478,7 @@ local entity_classes={
 						sprite=4
 					end
 					if sprite!=6 or self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
-						sspr2(9*sprite,30,9,7,x+8*i-24,y-3)
+						self:draw_sprite(24-8*i,3,9*sprite,30,9,7)
 					end
 				end
 			end
@@ -630,9 +627,9 @@ local entity_classes={
 	},
 	magic_tile={
 		-- draw
-		function(self,x,y)
+		function(self)
 			pal(7,rainbow_color)
-			sspr2(55,38,9,7,x-4,y-3)
+			self:draw_sprite(4,3,55,38,9,7)
 		end,
 		-- update
 		function(self)
@@ -734,7 +731,7 @@ local entity_classes={
 				f2=3
 			end
 			-- draw the card
-			sspr2(10*f2+77,21,10,10,x-5,y-7)
+			self:draw_sprite(5,7,10*f2+77,21,10,10)
 		end,
 		update=function(self)
 			if self.vx!=0 and self.frames_alive%5==4 and player and self.vx*(self:col()-player:col())>=0 then
@@ -748,8 +745,8 @@ local entity_classes={
 	},
 	flower_patch={
 		-- draw
-		function(self,x,y)
-			sspr2(ternary(self.hit_frames>0,119,ternary(self.frames_to_death>0,110,101)),71,9,8,x-4,y-4)
+		function(self)
+			self:draw_sprite(4,4,ternary(self.hit_frames>0,119,ternary(self.frames_to_death>0,110,101)),71,9,8)
 		end,
 		-- update
 		function(self)
@@ -825,14 +822,11 @@ local entity_classes={
 	magic_mirror={
 		-- draw
 		function(self)
-			local x,y,expression=self.x+self.idle_x,self.y+self.idle_y,self.expression
-			if boss_health.rainbow_frames>12 then
-				x+=scene_frame%2*2-1
-			end
+			local expression=self.expression
 			self:apply_colors()
 			if self.visible then
 				-- draw mirror
-				sspr2(115,0,13,30,x-6,y-12)
+				self:draw_sprite(6,12,115,0,13,30)
 			end
 			if self.visible or boss_health.rainbow_frames>0 then
 				-- the face is rainbowified after the player hits a tile
@@ -849,7 +843,7 @@ local entity_classes={
 				end
 				-- draw face
 				if expression>0 then
-					sspr2(11*expression-11,57,11,14,x-5,y-7,false,expression==5 and (self.frames_alive)%4<2)
+					self:draw_sprite(5,7,11*expression-11,57,11,14,false,expression==5 and (self.frames_alive)%4<2)
 				end
 			end
 			pal()
@@ -857,11 +851,11 @@ local entity_classes={
 			if self.visible then
 				-- draw top hat
 				if self.is_wearing_top_hat then
-					sspr2(102,0,13,9,x-6,y-15)
+					self:draw_sprite(6,15,102,0,13,9)
 				end
 				-- draw laser preview
 				if self.laser_preview_frames%2>0 then
-					line(x,y+7,x,60,14)
+					line(self.x,self.y+7,self.x,60,14)
 				end
 			end
 		end,
@@ -870,7 +864,10 @@ local entity_classes={
 			decrement_counter_prop(self,"laser_charge_frames")
 			decrement_counter_prop(self,"laser_preview_frames")
 			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
-			self.idle_x,self.idle_y=self.idle_mult*3*sin(self.frames_alive/60),self.idle_mult*2*sin(self.frames_alive/30)
+			self.draw_offset_x,self.draw_offset_y=self.idle_mult*3*sin(self.frames_alive/60),self.idle_mult*2*sin(self.frames_alive/30)
+			if boss_health.rainbow_frames>12 then
+				self.draw_offset_x+=scene_frame%2*2-1
+			end
 			self:apply_velocity()
 			-- keep mirror in bounds (for reeling purposes)
 			self.x,self.y=mid(0,self.x,80),mid(-40,self.y,-20)
@@ -893,8 +890,6 @@ local entity_classes={
 		laser_charge_frames=0,
 		laser_preview_frames=0,
 		idle_mult=0,
-		idle_x=0,
-		idle_y=0,
 		-- visible=false,
 		init=function(self)
 			local props,y={mirror=self,is_reflection=self.is_reflection},self.y+5
@@ -1382,11 +1377,10 @@ local entity_classes={
 	magic_mirror_hand={
 		-- draw
 		function(self)
-			local x,y=self.x+self.idle_x,self.y+self.idle_y-8
 			if self.visible then
 				-- hand may be holding a bouquet
 				if self.is_holding_bouquet then
-					sspr2(110,71,9,16,x-1,y-4)
+					self:draw_sprite(1,12,110,71,9,16)
 				end
 				-- reflections get a green tone
 				if self.is_reflection then
@@ -1396,13 +1390,13 @@ local entity_classes={
 				end
 				-- draw the hand
 				local is_right_hand=self.is_right_hand
-				sspr2(12*self.pose-12,46,12,11,x-ternary(is_right_hand,7,4),y,is_right_hand)
+				self:draw_sprite(ternary(is_right_hand,7,4),8,12*self.pose-12,46,12,11,is_right_hand)
 				-- hand may be holding a wand
 				if self.is_holding_wand then
 					if self.pose==1 then
-						sspr2(91,54,7,13,x+ternary(is_right_hand,-10,4),y,is_right_hand)
+						self:draw_sprite(ternary(is_right_hand,10,-4),8,91,54,7,13,is_right_hand)
 					else
-						sspr2(98,54,7,13,x-ternary(is_right_hand,3,2),y-8,is_right_hand)
+						self:draw_sprite(ternary(is_right_hand,3,2),16,98,54,7,13,is_right_hand)
 					end
 				end
 			end
@@ -1414,10 +1408,10 @@ local entity_classes={
 			end
 			local f,m=boss.frames_alive+ternary(self.is_right_hand,9,4),self.mirror
 			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
-			self.idle_x,self.idle_y=self.idle_mult*3*sin(f/60),self.idle_mult*4*sin(f/30)
+			self.draw_offset_x,self.draw_offset_y=self.idle_mult*3*sin(f/60),self.idle_mult*4*sin(f/30)
 			self:apply_velocity()
 			if self.is_holding_mirror then
-				self.idle_x,self.idle_y,self.x,self.y=m.idle_x,m.idle_y,m.x+2*self.dir,m.y+13
+				self.draw_offset_x,self.draw_offset_y,self.x,self.y=m.draw_offset_x,m.draw_offset_y,m.x+2*self.dir,m.y+13
 			end
 			return true
 		end,
@@ -1427,8 +1421,6 @@ local entity_classes={
 		pose=3,
 		dir=-1,
 		idle_mult=0,
-		idle_x=0,
-		idle_y=0,
 		copy_hand=function(self,hand)
 			self.pose,self.x,self.y,self.visible=hand.pose,hand.x,hand.y,hand.visible
 		end,
@@ -1535,8 +1527,8 @@ local entity_classes={
 		-- draw
 		function(self,x,y)
 			if hard_mode then
-				sspr2(61,78,31,6,x-15,y+3)
-				sspr(61,83,31,1,x-14.5,y+9.5,31,100)
+				self:draw_sprite(15,-3,96,90,31,5)
+				sspr(96,95,31,1,x-14.5,y+9.5,31,100)
 			else
 				sspr(117,30,11,1,x-4.5,y+4.5,11,100)
 			end
@@ -1557,7 +1549,7 @@ local entity_classes={
 				if (f2+4)%30>14 then
 					pal(14,8)
 				end
-				sspr2(ternary(f2%30<20,36,45),30,9,7,x-4,y-5-max(0,f-0.07*f*f))
+				self:draw_sprite(4,5+max(0,f-0.07*f*f),ternary(f2%30<20,36,45),30,9,7)
 			end
 		end,
 		frames_to_death=150,
@@ -1572,19 +1564,19 @@ local entity_classes={
 	poof={
 		-- draw
 		function(self,x,y,f)
-			sspr2(64+16*flr(f/3),31,16,14,x-8,y-8)
+			self:draw_sprite(8,8,64+16*flr(f/3),31,16,14)
 		end,
 		frames_to_death=12,
 		render_layer=9
 	},
 	pain={
 		-- draw
-		function(self,x,y)
+		function(self)
 			pal(7,10)
 			if self.frames_to_death<=2 then
 				palt(10,true)
 			end
-			sspr2(105,45,23,26,x-11,y-16)
+			self:draw_sprite(11,16,105,45,23,26)
 		end,
 		is_pause_immune=true,
 		render_layer=12,
@@ -1704,9 +1696,9 @@ function _draw()
 	end
 	-- draw the grid
 	camera(shake_x-23,-65)
-	sspr2(47,79,81,49,0,-1)
+	draw_sprite(0,-1,47,79,81,49)
 	for i=0,39 do
-		sspr2(83+i%2*11,45,11,9,10*flr(i/5),i%5*8)
+		draw_sprite(10*flr(i/5),i%5*8,83+i%2*11,45,11,9)
 	end
 	-- draw entities
 	foreach(entities,function(entity)
@@ -1718,7 +1710,7 @@ function _draw()
 	camera(shake_x)
 	if boss_phase>0 then
 		-- draw score multiplier
-		sspr2(72,45,11,7,6,2)
+		draw_sprite(6,2,72,45,11,7)
 		print(score_mult,8,3,0)
 		-- draw score
 		print(score_text,121-4*#score_text,3,1)
@@ -1829,6 +1821,11 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			draw2=function(self)
 				self:draw(self.x,self.y,self.frames_alive,self.frames_to_death)
 				pal()
+			end,
+			draw_offset_x=0,
+			draw_offset_y=0,
+			draw_sprite=function(self,dx,dy,...)
+				draw_sprite(self.x+self.draw_offset_x-dx,self.y+self.draw_offset_y-dy,...)
 			end,
 			die=function(self)
 				if not self.finished then
@@ -2089,8 +2086,8 @@ function is_rendered_on_top_of(a,b)
 	return ternary(a.render_layer==b.render_layer,a:row()>b:row(),a.render_layer>b.render_layer)
 end
 
-function sspr2(x,y,width,height,x2,y2,...)
-	sspr(x,y,width,height,x2+0.5,y2+0.5,width,height,...)
+function draw_sprite(x,y,sx,sy,sw,sh,...)
+	sspr(sx,sy,sw,sh,x+0.5,y+0.5,sw,sh,...)
 end
 
 function color_wash(c)
@@ -2263,16 +2260,16 @@ __gfx__
 000000060600606000000060000606000000000060600002222222222222222222222222222222222222222ff07700f9777778188888183b888bb00008800300
 00000006060060600000006000006060000000006060000222222222222222222222222222222222222222200000000f99777880000088000b30000000000030
 00000006060060600000006000000606000000006060000555511111111111111111111111111111111111111111111111111111111111111111111111115555
-066000060600606000000060066000606000000060600005000000077770000000500000000000880880000000002222222222222222220003b0000222222225
-66660006060060600000006066660006060000006060000177000007f970000000600000000008888ee800000000222222222222222222000330000222222221
-66060006060060600000006066060000666000006060000177700077f000000000500000000008888ee800000000222222222222222222000330000222222221
+066000060600606000000060066000606000000060600005000000077770000000500000000000880880000000002222222222222222220003b1330222222225
+66660006060060600000006066660006060000006060000177000007f970000000600000000008888ee800000000222222222222222222000333000222222221
+66060006060060600000006066060000666000006060000177700077f000000000500000000008888ee800000000222222222222222222000333000222222221
 6000000606006060000000606000000006600000606000017797007ff000000000600000000000888880000000002222222222222222220003100000000d0001
 60000006660060600000006066000000066000006060000177f7707f0000000000600000000000088800000000002222222222222222220001300000000dd001
 0d000dddd0000ddd00000d00ddd00000ddd00000d0d0000177777777000000000060000000000000800000000000222222222222222222000130000ddddddd01
 00dddddd000000ddddddd0000ddddddddd00000ddddd000100777777700000000060000000000000000000000000222222222222222222000130000dddddddd1
-22222222222222222222222222222222222222222222222100777077700000000050000000000000077000000000222222222222222222200009990ddddddd01
-0000666666600000666660000006600066666666666666610077777e700000000053b0ff0777700077f0077770002222222222222222222000944990000dd001
-000666000006000006666000006666006066600000000661007777770000000000943bff777777707f7077ff70002222222222222222222009999490000d0001
+22222222222222222222222222222222222222222222222100777077700000000050000000000000077000000000222222222222222222222222222ddddddd01
+0000666666600000666660000006600066666666666666610077777e700000000053b0ff0777700077f0077770002222222222222222222222222220000dd001
+000666000006000006666000006666006066600000000661007777770000000000943bff777777707f7077ff70002222222222222222222222222220000d0001
 0066600000006000066666000060660060660000000006610077777770000000004930077777777f7f07f900000022220000000fff77777777777fff00000001
 060660000000660006606600000006006066000000006601007777ff7ff0000000990307777777777f7f0000000022220000effff7777777777777ffffe00001
 060600000000660006606660000006006066000000000661007f77f777f000000099000777777777777700000000222200eefff77777777777777777fffee001
