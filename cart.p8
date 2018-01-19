@@ -69,7 +69,7 @@ tokens:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_animations=0,false
+local starting_phase,skip_animations=4,true
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=0,0,0,0,0,1,8,0,0,1 -- ,false,false
@@ -87,8 +87,7 @@ local entity_classes={
 		-- update
 		function(self)
 			if self.frames_alive%15==0 then
-				self:poof()
-				spawn_entity("bunny",self,nil,{vx=ternary(rnd()<0.5,1,-1)*(1+rnd(2)),vy=-1-rnd(2)})
+				spawn_entity("bunny",self,nil,{vx=ternary(rnd()<0.5,1,-1)*(1+rnd(2)),vy=-1-rnd(2)}):poof()
 			end
 		end
 	},
@@ -112,22 +111,21 @@ local entity_classes={
 		-- update
 		function(self)
 			decrement_counter_prop(self,"anim_frames")
-			self.percent_closed=100*ease_out_in(self.anim_frames/100)
+			self.amount_closed=62*ease_out_in(self.anim_frames/100)
 			if self.anim!="open" then
-				self.percent_closed=100-self.percent_closed
+				self.amount_closed=62-self.amount_closed
 			end
 		end,
 		is_pause_immune=true,
 		render_layer=14,
-		-- percent_closed=100,
+		-- amount_closed=62,
 		anim_frames=0,
 		draw_curtain=function(self,x,dir)
-			rectfill(x-10*dir,0,x+dir*.62*self.percent_closed,127,0)
-			local lines={0,94,5,70,11,34,21,20}
-			local i
-			for i=1,#lines,2 do
-				local line_x=x+0.5+dir*(self.percent_closed/10+(1+self.percent_closed/100)*lines[i])
-				line(line_x,11,line_x,lines[i+1],2)
+			rectfill(x-10*dir,0,x+dir*self.amount_closed,127,0)
+			local x2
+			for x2=10,63,14 do
+				local x3=x+0.5+dir*x2*(1+self.amount_closed/62)/2
+				line(x3,11,x3,60+40*cos(x2/90-0.02),2)
 			end
 		end,
 		set_anim=function(self,anim)
@@ -157,8 +155,8 @@ local entity_classes={
 		draw_prompt=function(self,text)
 			if self.frames_alive%30<22 and self.frames_alive>self.frames_until_active and not self.is_activated then
 				text="press    to "..text
-				print_centered(text,self.x,99,13)
-				self:draw_sprite(44-2*#text,-98,119,83,8,7)
+				print_centered(text,63,99,13)
+				draw_sprite(87-2*#text,98,119,83,8,7)
 				return true
 			end
 		end,
@@ -166,14 +164,14 @@ local entity_classes={
 	},
 	title_screen={
 		-- draw
-		function(self,x)
+		function(self)
 			self:draw_sprite(23,-26,0,71,47,16)
 			self:draw_sprite(23,-44,0,88,47,40)
 			-- hard mode prompt
 			if self:draw_prompt("begin") and dget(0)>0 then
 				pal(13,8)
-				print_centered("or    for hard mode",x,108)
-				self:draw_sprite(27,-107,119,83,8,7,true)
+				print_centered("or    for hard mode",63,108)
+				draw_sprite(36,107,119,83,8,7,true)
 			end
 		end,
 		-- update
@@ -184,7 +182,7 @@ local entity_classes={
 			end
 		end,
 		extends="screen",
-		frames_until_active=3,--25,
+		frames_until_active=5,
 		on_activated=function()
 			curtains:promise_sequence(
 				27,
@@ -192,11 +190,11 @@ local entity_classes={
 				function()
 					entities,new_entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},{},max(0,starting_phase-1),0,1,0 -- ,false
 					player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health") -- ,nil,...
-					-- todo remove debug schtuff
 					if starting_phase>0 then
 						boss=spawn_entity("magic_mirror")
 						boss.visible,boss_health.visible=true,true
 						boss:promise_sequence(30,"intro")
+						-- todo remove debug schtuff -> 19 tokens
 						if starting_phase>1 then
 							boss.is_wearing_top_hat=true
 						end
@@ -214,7 +212,7 @@ local entity_classes={
 		function(self,x)
 			print_centered("thank you for playing!",x,28,rainbow_color)
 			print_centered("created with love",x,66,6)
-			print_centered("by bridgs",x,73,6)
+			print_centered("by bridgs",x,73)
 			print_centered("https://brid.gs",x,83,12)
 			self:draw_sprite(11,-43,ternary(hard_mode,70,48),80,22,16)
 			self:draw_prompt("continue")
@@ -250,8 +248,8 @@ local entity_classes={
 			if self.show_best then
 				self:draw_score(x,81,"best:",dget(score_data_index).."00",format_timer(dget(time_data_index)))
 			end
-			self:draw_prompt("continue")
-			if f>185 and f%30<22 and self.show_best then
+			-- show prompt
+			if self:draw_prompt("continue") then
 				-- show score bang
 				if dget(score_data_index)==score then
 					print("!",x+9.5,81,9)
@@ -265,9 +263,11 @@ local entity_classes={
 		-- update
 		function(self)
 			if self.frames_alive==115 then
+				-- sfx(...)
 				score+=max(0,380-timer_seconds)
 				self.show_score=true
 			elseif self.frames_alive==150 then
+				-- sfx(...)
 				if score>=dget(score_data_index) then
 					dset(score_data_index,score)
 				end
@@ -305,8 +305,8 @@ local entity_classes={
 	},
 	player_figment={
 		-- draw
-		function(self,x,y,f)
-			self:draw_sprite(5,6,88,ternary(f<120,8,0),11,8)
+		function(self)
+			self:draw_sprite(5,6,88,ternary(self.frames_alive<120,8,0),11,8)
 		end,
 		is_pause_immune=true,
 		render_layer=17
@@ -673,6 +673,19 @@ local entity_classes={
 		end
 	},
 	player_reflection={
+		-- draw
+		nil,
+		-- update
+		function(self)
+			local prev_col,prev_row=self:col(),self:row()
+			self:copy_player()
+			if (prev_col!=self:col() or prev_row!=self:row()) and get_tile_occupant(self) and player then
+				get_tile_occupant(self):get_bumped()
+				player:bump()
+				self:copy_player()
+			end
+			return true
+		end,
 		extends="player",
 		primary_color=11,
 		secondary_color=3,
@@ -680,17 +693,6 @@ local entity_classes={
 		init=function(self)
 			self:copy_player()
 			self:poof()
-		end,
-		update=function(self)
-			local prev_col,prev_row=self:col(),self:row()
-			self:copy_player()
-			local occupant=get_tile_occupant(self)
-			if (prev_col!=self:col() or prev_row!=self:row()) and occupant and player then
-				player:bump()
-				self:copy_player()
-				occupant:get_bumped()
-			end
-			return true
 		end,
 		on_hurt=function(self,entity)
 			if player then
@@ -701,13 +703,8 @@ local entity_classes={
 		end,
 		copy_player=function(self)
 			if player then
-				-- 0 = left, 1 = right, 2 = up, 3 = down
-				local mirrored_directions,props={1,0,2,3},{"y","step_frames","stun_frames","teeter_frames","bump_frames","invincibility_frames","frames_alive"}
-				self.x,self.facing=80-player.x,mirrored_directions[player.facing+1]
-				local p
-				for p in all(props) do
-					self[p]=player[p]
-				end
+				self.x,self.facing=80-player.x,({1,0,2,3})[player.facing+1]
+				copy_props(player,self,{"y","step_frames","stun_frames","teeter_frames","bump_frames","invincibility_frames","frames_alive"})
 			end
 		end
 	},
@@ -719,25 +716,26 @@ local entity_classes={
 				pal(5,8)
 				pal(6,15)
 			end
-			pal(5,7)
-			pal(6,14)
-			pal(7,ternary(f%4<2,14,8))
+			-- pal(5,7)
+			-- pal(6,14)
+			-- pal(7,ternary(f%4<2,14,8))
 			-- spin counter-clockwise when moving left
 			local f2=flr(f/4)%4
 			if self.vx<0 then
 				f2=(6-f2)%4
 			end
-			if self.vx==0 then
-				f2=3
-			end
+			-- if self.vx==0 then
+			-- 	f2=3
+			-- end
 			-- draw the card
 			self:draw_sprite(5,7,10*f2+77,21,10,10)
 		end,
-		update=function(self)
-			if self.vx!=0 and self.frames_alive%5==4 and player and self.vx*(self:col()-player:col())>=0 then
-				self.vx,self.vy=0,ternary(player.y<self.y,-1,1)
-			end
-		end,
+		-- update
+		-- function(self)
+			-- if self.vx!=0 and self.frames_alive%5==4 and player and self.vx*(self:col()-player:col())>=0 then
+			-- 	self.vx,self.vy=0,ternary(player.y<self.y,-1,1)
+			-- end
+		-- end,
 		-- vx,is_red
 		frames_to_death=120+120,
 		hitbox_channel=1, -- player
@@ -758,8 +756,18 @@ local entity_classes={
 		is_boss_generated=true,
 		hit_frames=0,
 		bloom=function(self)
-			self.frames_to_death,self.hit_frames,self.hitbox_channel=ternary(boss_phase==4,10,30),4,1
-			spawn_petals(self.x,self.y,2,8)
+			self.frames_to_death,self.hit_frames,self.hitbox_channel=15,4,1
+			local i
+			for i=1,2 do
+				spawn_entity("particle",self.x,self.y-2,{
+					vx=i-1.5,
+					vy=-1-rnd(),
+					friction=0.9,
+					gravity=0.06,
+					frames_to_death=10+rnd(7),
+					color=8
+				})
+			end
 		end
 	},
 	coin={
@@ -813,7 +821,7 @@ local entity_classes={
 		render_layer=11,
 		friction=1,
 		gravity=0,
-		color=7,
+		-- color=7,
 		init=function(self)
 			self:update()
 			self:apply_velocity()
@@ -821,7 +829,7 @@ local entity_classes={
 	},
 	magic_mirror={
 		-- draw
-		function(self)
+		function(self,x,y,f)
 			local expression=self.expression
 			self:apply_colors()
 			if self.visible then
@@ -831,19 +839,15 @@ local entity_classes={
 			if self.visible or boss_health.rainbow_frames>0 then
 				-- the face is rainbowified after the player hits a tile
 				if boss_health.rainbow_frames>0 then
-					if not self.is_reflection then
-						color_wash(rainbow_color)
-						if expression>0 and boss_phase>0 then
-							pal(13,13)
-						end
-					elseif expression==0 then
-						color_wash(11)
+					color_wash(rainbow_color)
+					if expression>0 and boss_phase>0 then
+						pal(13,3)
 					end
 					expression=8
 				end
 				-- draw face
 				if expression>0 then
-					self:draw_sprite(5,7,11*expression-11,57,11,14,false,expression==5 and (self.frames_alive)%4<2)
+					self:draw_sprite(5,7,11*expression-11,57,11,14,false,expression==5 and f%4<2)
 				end
 			end
 			pal()
@@ -855,7 +859,7 @@ local entity_classes={
 				end
 				-- draw laser preview
 				if self.laser_preview_frames%2>0 then
-					line(self.x,self.y+7,self.x,60,14)
+					line(x,y+7,x,60,14)
 				end
 			end
 		end,
@@ -863,8 +867,7 @@ local entity_classes={
 		function(self)
 			decrement_counter_prop(self,"laser_charge_frames")
 			decrement_counter_prop(self,"laser_preview_frames")
-			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
-			self.draw_offset_x,self.draw_offset_y=self.idle_mult*3*sin(self.frames_alive/60),self.idle_mult*2*sin(self.frames_alive/30)
+			calc_idle_mult(self,self.frames_alive,2)
 			if boss_health.rainbow_frames>12 then
 				self.draw_offset_x+=scene_frame%2*2-1
 			end
@@ -936,7 +939,7 @@ local entity_classes={
 					{"return_to_ready_position",nil,"right"})
 			elseif boss_phase==2 then
 				promise=self:promise_sequence(
-					-- "conjure_flowers",
+					"conjure_flowers",
 					"return_to_ready_position",
 					"throw_cards",
 					"return_to_ready_position",
@@ -1002,7 +1005,7 @@ local entity_classes={
 		end,
 		phase_change=function(self)
 			-- music(13)
-			local lh,promise=self.left_hand
+			local lh,rh,promise=self.left_hand,self.right_hand
 			if skip_animations then
 				if boss_phase==0 then
 					self.is_wearing_top_hat=true
@@ -1030,7 +1033,7 @@ local entity_classes={
 					{"set_pose",4},
 					10,
 				-- grab handle
-					{self.right_hand,"appear"},
+					{rh,"appear"},
 					15,
 					"grab_mirror_handle",
 					5,
@@ -1069,20 +1072,19 @@ local entity_classes={
 					"set_all_idle",
 					10,
 				-- pound fists
-					{"pound",0},
-					{"pound",0},
-					{"pound",3},
+					"pound",
+					"pound",
+					"pound",
 				-- the bouquet appears!
 					{"set_expression",1},
 					function()
 						lh.is_holding_bouquet=true
-						spawn_petals(lh.x,lh.y-6,4,8)
 					end,
-					{self.right_hand,"set_pose"},
-					{"move",20,-10,10,ease_in,{0,-5,-5,0},true},
+					{rh,"set_pose"},
+					{"move",20,-10,15,ease_in,{-20,-10,-5,0},true},
 					35,
 				-- sniff the flowers
-					{lh,"move",-2,-12,20,ease_in,nil,true},
+					{lh,"move",2,-9,20,ease_in,nil,true},
 					{self,"set_expression",3},
 					30,
 					{self,"set_expression",1},
@@ -1095,11 +1097,10 @@ local entity_classes={
 							function()
 								lh.is_holding_bouquet=false
 							end,
-							{"move",-18,6,20,ease_in,nil,true})
+							{"move",-22,6,20,ease_in,nil,true})
 					end,
-					{self.right_hand,"move",0,10,20,ease_out_in,{-25,-20,-25,0},true},
-					15,
-					{self,"return_to_ready_position"})
+					{rh,"move",0,7,20,ease_out_in,{-35,-20,-25,0},true},
+					15)
 			elseif boss_phase==2 then
 				return self:promise_sequence(
 					{"return_to_ready_position",2},
@@ -1126,10 +1127,9 @@ local entity_classes={
 			despawn_boss_entities(new_entities)
 		end,
 		-- medium-level commands
-		pound=function(self,offset)
-			return self:promise_parallel(
-				{self.left_hand,"pound",offset},
-				{self.right_hand,"pound",-offset})
+		pound=function(self)
+			self.left_hand:pound()
+			return self.right_hand:pound()
 		end,
 		reel=function(self,times)
 			spawn_entity("heart",10*rnd_int(3,6)-5,4)
@@ -1202,9 +1202,11 @@ local entity_classes={
 				"set_all_idle",
 				{"set_expression",2},
 				{lh,"move",23,14,20,ease_in,nil,true},
-				{"set_pose",1},
-				{rh,"wave"},
-				"wave",
+				{"set_pose",1})
+			-- wave hand
+				:and_then_repeat(2,
+					{rh,"move",0,0,40,linear,{18,6,-18,6},true})
+				:and_then_sequence(
 				function()
 					if upgraded_version then
 						rh:promise_sequence(
@@ -1268,7 +1270,8 @@ local entity_classes={
 					20)
 		end,
 		shoot_lasers=function(self)
-			self.left_hand:disappear()
+			self.left_hand.visible=false
+			self.left_hand:poof()
 			local col=rnd_int(0,7)
 			return self:promise_sequence(
 				{"set_held_state","right"},
@@ -1370,8 +1373,9 @@ local entity_classes={
 		is_reflection=true,
 		init=function(self)
 			boss.init(self)
-			self.left_hand:copy_hand(boss.left_hand)
-			self.right_hand:copy_hand(boss.right_hand)
+			local props={"pose","x","y","visible"}
+			copy_props(boss.left_hand,self.left_hand,props)
+			copy_props(boss.right_hand,self.right_hand,props)
 		end
 	},
 	magic_mirror_hand={
@@ -1403,12 +1407,9 @@ local entity_classes={
 		end,
 		-- update
 		function(self)
-			if self.is_reflection then
-				self.render_layer=6
-			end
-			local f,m=boss.frames_alive+ternary(self.is_right_hand,9,4),self.mirror
-			self.idle_mult=ternary(self.is_idle,min(self.idle_mult+0.05,1),max(0,self.idle_mult-0.05))
-			self.draw_offset_x,self.draw_offset_y=self.idle_mult*3*sin(f/60),self.idle_mult*4*sin(f/30)
+			local m=self.mirror
+			self.render_layer=ternary(self.is_reflection,6,ternary(self.is_right_hand,9,8))
+			calc_idle_mult(self,boss.frames_alive+ternary(self.is_right_hand,9,4),4)
 			self:apply_velocity()
 			if self.is_holding_mirror then
 				self.draw_offset_x,self.draw_offset_y,self.x,self.y=m.draw_offset_x,m.draw_offset_y,m.x+2*self.dir,m.y+13
@@ -1417,21 +1418,19 @@ local entity_classes={
 		end,
 		-- is_right_hand,dir
 		-- is_holding_bouquet=false,
-		render_layer=8,
+		-- render_layer=8,
 		pose=3,
 		dir=-1,
 		idle_mult=0,
-		copy_hand=function(self,hand)
-			self.pose,self.x,self.y,self.visible=hand.pose,hand.x,hand.y,hand.visible
-		end,
 		-- highest-level commands
 		throw_cards=function(self)
-			local dir,r=self.dir
+			local dir=self.dir
 			local promise=self:promise_sequence(
 				8-dir*8,
 				function()
 					self.is_idle=false
 				end)
+			local r
 			for r=ternary(self.is_right_hand,0,1),9,2 do
 				promise=promise:and_then_sequence(
 					-- move to the correct row
@@ -1473,9 +1472,8 @@ local entity_classes={
 				end)
 		end,
 		cancel_everything=function(self)
-			self:cancel_promises()
+			self.is_holding_wand,self.is_holding_mirror=self:cancel_promises() -- nil,nil
 			self:cancel_move()
-			self.is_holding_wand,self.is_holding_mirror=false -- ,nil
 		end,
 		release_mirror=function(self)
 			self.is_holding_mirror=false
@@ -1489,24 +1487,11 @@ local entity_classes={
 				return self:poof()
 			end
 		end,
-		wave=function(self)
-			return self:promise_sequence(
-				{"move",-10,0,20,linear,{0,-3,0,-3},true},
-				{"move",10,0,20,linear,{0,3,0,3},true})
-		end,
-		disappear=function(self)
-			self.visible=false
-			return self:poof()
-		end,
-		pound=function(self,offset)
-			local mirror=self.mirror
+		pound=function(self)
+			local m,d=self.mirror,20*self.dir
 			return self:promise_sequence(
 				{"set_pose",2},
-			-- move out
-				{"move",mirror.x+20*self.dir,mirror.y+20,10,ease_in},
-			-- move in
-				{"move",mirror.x+ternary(offset==0,4,0)*self.dir,mirror.y+20+offset,5,ease_out},
-			-- pound!
+				{"move",m.x+4*self.dir,m.y+20,15,ease_out,{d,0,d,0}},
 				function()
 					freeze_and_shake_screen(0,2)
 				end,
@@ -1528,7 +1513,7 @@ local entity_classes={
 		function(self,x,y)
 			if hard_mode then
 				self:draw_sprite(15,-3,96,90,31,5)
-				sspr(96,95,31,1,x-14.5,y+9.5,31,100)
+				sspr(96,95,31,1,x-14.5,y+8.5,31,100)
 			else
 				sspr(117,30,11,1,x-4.5,y+4.5,11,100)
 			end
@@ -1538,24 +1523,20 @@ local entity_classes={
 		render_layer=9,
 		frames_to_death=14,
 		is_hitting=function(self,entity)
-			local c1,c2=self:col(),entity:col()
-			return c1==c2 or (hard_mode and (c1==c2-1 or c1==c2+1))
+			local dcol,dist=self:col()-entity:col(),ternary(hard_mode,1,0)
+			return dcol==mid(-dist,dcol,dist)
 		end
 	},
 	heart={
 		-- draw
 		function(self,x,y,f,f2)
 			if f2>30 or f2%4>1 then
-				if (f2+4)%30>14 then
-					pal(14,8)
-				end
 				self:draw_sprite(4,5+max(0,f-0.07*f*f),ternary(f2%30<20,36,45),30,9,7)
 			end
 		end,
 		frames_to_death=150,
 		hurtbox_channel=2, -- pickup
 		on_hurt=function(self)
-			freeze_and_shake_screen(2,0)
 			player_health:gain_heart()
 			spawn_particle_burst(self,0,6,8,4)
 			self:die()
@@ -1572,15 +1553,10 @@ local entity_classes={
 	pain={
 		-- draw
 		function(self)
-			pal(7,10)
-			if self.frames_to_death<=2 then
-				palt(10,true)
-			end
 			self:draw_sprite(11,16,105,45,23,26)
 		end,
-		is_pause_immune=true,
 		render_layer=12,
-		frames_to_death=5
+		frames_to_death=3
 	},
 	points={
 		-- draw
@@ -1762,20 +1738,6 @@ function spawn_particle_burst(source,dy,num_particles,color,speed)
 	return particles
 end
 
-function spawn_petals(x,y,num_petals,color)
-	local i
-	for i=1,num_petals do
-		spawn_entity("particle",x,y-2,{
-			vx=i-0.5-num_petals/2,
-			vy=-1-rnd(),
-			friction=0.9,
-			gravity=0.06,
-			frames_to_death=10+rnd(7),
-			color=color
-		})
-	end
-end
-
 -- magic tile functions
 function spawn_magic_tile(frames_to_death)
 	if boss_health.health>=60 then
@@ -1948,6 +1910,18 @@ function slide(entity,dir)
 	entity.x+=dir*2
 	entity:move(-dir*127,0,100,ease_in_out,{dir*70,0,0,0},true)
 	return entity
+end
+
+function calc_idle_mult(entity,f,n)
+	entity.idle_mult=mid(0,entity.idle_mult+ternary(entity.is_idle,0.05,-0.05),1)
+	entity.draw_offset_x,entity.draw_offset_y=entity.idle_mult*3*sin(f/60),entity.idle_mult*n*sin(f/30)
+end
+
+function copy_props(source,target,props)
+	local p
+	for p in all(props) do
+		target[p]=source[p]
+	end
 end
 
 -- promise functions
@@ -2225,32 +2199,32 @@ __gfx__
 000000000000dd0000000066660dddddddd0d666d666dd6d6d6d6d27177777170000777700000000777770000000077077700000000007000000000000000000
 0000000000000000000000006600dddddd00dd66666dddd66666dd27111111170000777000000000777770077000077000707077000000000000000000000000
 00000000000000000000000000000dddd0000d5ddddd00d5dddd5027777777770000000000000000077000077000000000000000000000000000000000000000
-000000000000000000000000000000000000005d5d50000555d50022222222222222222201111111110511111111155111111111500000000000000000000700
-00000000000000000000000000000000000000770000000000000070000007700000000011111111111115555555111155555551100000000000000000007000
-00000000000000000000000000007700000000777000000000000770000007700770000011111101011155111115511551111155100000000000000700007000
-00000000000000000000000000007700000000077000000000000770000007770770000011111110111151115111511511151115100000000000000700070000
+000000000000000000000000000000000000005d5d50000555d50022222222222222222201111111110511111111155111111111500000000000000000000a00
+0000000000000000000000000000000000000077000000000000007000000770000000001111111111111555555511115555555110000000000000000000a000
+00000000000000000000000000007700000000777000000000000770000007700770000011111101011155111115511551111155100000000000000a0000a000
+00000000000000000000000000007700000000077000000000000770000007770770000011111110111151115111511511151115100000000000000a000a0000
 0000000000000000000000000770077000000007770000000000077000000077066000001111110101115115151151151155511510000000000000a000aa0000
-0000776777770000777000000777067000000000770770000000077000000076777000001111111111115111511151151115111510000700000000aa0aa00000
+0000776777770000777000000777067000000000770770000000077000000076777000001111111111115111511151151115111510000a00000000aa0aa00000
 00d77777777700d77777700000677067007700776677700000777770770000077770000001111111110155111115511551111155100000a000000aaaaaa00000
-00d77dd7600000d77dd770007706676677770777767700000077767777000007667000002ddddd00000115555555111155555551100000aaa000000aaa000077
-00d77777777700d7777770007777666677600776767700000076767770000007777000002d0d0d001015111111111551111111115000000a00000000aaaaaa00
-00d77dd7777700d77dd770000066666666000067677700000066677600000007776d00002d0d0d0001022222222550000000000000000000000000000aaa0000
-00d67777700000d67777600000006666dd000006666d0000006676600000000066dd000025ddd500101222222225500000006600000000000000000000a00000
-000066660000000066660000000000ddd000000066d00000000dddd000000000ddd000002ddddd00000222222225550000006600000000000000000000a00000
+00d77dd7600000d77dd7700077066766777707777677000000777677770000076670000022222222222115555555111155555551100000aaa000000aaa0000aa
+00d77777777700d777777000777766667760077676770000007676777000000777700000222222222225111111111551111111115000000a00000000aaaaaa00
+00d77dd7777700d77dd770000066666666000067677700000066677600000007776d00002222222222222222222550000000000000000000000000000aaa0000
+00d67777700000d67777600000006666dd000006666d0000006676600000000066dd000022222222222222222225500000006600000000000000000000a00000
+000066660000000066660000000000ddd000000066d00000000dddd000000000ddd0000022222222222222222225550000006600000000000000000000a00000
 00006660000000066600000000666000000007770000000076600000000cbb000000006660000000066600002220550000005500000000000000000000000000
 006666666000066666660000777772700007777776000067667770000accbbee0000666666600007777727002220000000006600000000000000000000000000
 07777772770077766627700ddd772ddd007777766770067677676700aaccbbee80077777dd7700ddd772ddd02220000000005500000000a00000000000000000
 0ddd772ddd0077777727700777772777007776677660077676767600aaccbbee800dd77277d70077777277702220055500005500000000a00000000000000000
 7777772777777dd772dd7777d77772d7777667766666676766766776aaccbbee887777727777777d77772d77222000550000550000000aaa0000000000000000
 77d77772d777776d7d67777d7d772d7d766776666677767677677666aaccbbee887d77772d7767ddd772ddd72220005550005500000aaaaaa00000000a000000
-7d7d772d7d7777777727777777722777777666667777677676766776aaccbbee88d7d772d7d7677d77227d7722200006600055000770000aaa000000aaa00000
+7d7d772d7d7777777727777777722777777666667777677676766776aaccbbee88d7d772d7d7677d77227d7722200006600055000aa0000aaa000000aaa00000
 77d77227d777d7d772d7d777ddddddd7766666777776767767777676aaccbbee887d77227d777777727727772220000555005500000000aaaaaa000000a00000
-7777277277777d77227d7777ddddddd7766677777667776776767766aaccbbee8877727727777777ddddd7772220000066005500000000aa0aa0000000070000
+7777277277777d77227d7777ddddddd7766677777667776776767766aaccbbee8877727727777777ddddd7772220000066005500000000aa0aa00000000a0000
 77d72777d777777277277777ddddddd776777776677767676767766111ee11cc117772dd7777777ddddddd77222000006600000000000aa000a0000000000000
-07ddddddd70077ddddd770077ddddd7700777667777006766676670011ee11cc1007dddd7777007d72777d70009f077700000222200007000700000000000000
-06772777760077d277d7700667277766007667777770076776767600ddddddddd0067277777600677277776009ff7ff700000222200070000700000000000000
-006677766000077277770000666666600007777777000076776670000ddddddd000066777660000666666600fff7f7f000000222200070000000000000000000
-00006660000000066600000000666000000007770000000076700000000ddd00000000666000000006660000f77f7f0000000222200700000000000000000000
+07ddddddd70077ddddd770077ddddd7700777667777006766676670011ee11cc1007dddd7777007d72777d70009f07770000022220000a000a00000000000000
+06772777760077d277d7700667277766007667777770076776767600ddddddddd0067277777600677277776009ff7ff7000002222000a0000a00000000000000
+006677766000077277770000666666600007777777000076776670000ddddddd000066777660000666666600fff7f7f0000002222000a0000000000000000000
+00006660000000066600000000666000000007770000000076700000000ddd00000000666000000006660000f77f7f0000000222200a00000000000000000000
 00006666666066660000660006666666660066666666666222222222222222222222222222222222222222207777777777000000000000088000800000030000
 000000660600606000066660666000006660660060600662222222222222222222222222222222222222222777777777777ff880000088888b088e0088030880
 000000060600606000060660660000000660600060600062222222222222222222222222222222222222222777077777777ff8188888188883b8888088008880
