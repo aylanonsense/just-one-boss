@@ -458,7 +458,23 @@ local entity_classes={
 				score_mult=1
 				freeze_and_shake_screen(6,10)
 				self.invincibility_frames,self.stun_frames=60,19
-				player_health:lose_heart()
+				-- lose heart
+				if player_health.hearts>0 then
+					player_health.hearts-=1
+					player_health.anim,player_health.anim_frames="lose",20
+					if player_health.hearts<=0 then
+						promises,is_paused,player_health.render_layer={},true,16
+						freeze_and_shake_screen(35,0)
+						spawn_entity("death_screen")
+						player_figment=spawn_entity("player_figment",player.x+23,player.y+65)
+						player_figment:move(63,72,60)
+						curtains:set_anim() -- close
+						player_health:promise_sequence(
+							30,
+							{"move",62.5,45,60,ease_in_out,{-60,10,-40,10}})
+						player=player:die()
+					end
+				end
 			end
 		end
 	},
@@ -468,18 +484,17 @@ local entity_classes={
 			if self.visible then
 				local i
 				for i=1,4 do
-					self:draw_sprite(24-8*i,3,0,30,9,7)
 					local sprite=0
 					if self.anim=="gain" and i==self.hearts then
 						sprite=mid(1,5-flr(self.anim_frames/2),3)
 					elseif self.anim=="lose" and i==self.hearts+1 then
-						sprite=6
+						if self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
+							sprite=6
+						end
 					elseif i<=self.hearts then
 						sprite=4
 					end
-					if sprite!=6 or self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
-						self:draw_sprite(24-8*i,3,9*sprite,30,9,7)
-					end
+					self:draw_sprite(24-8*i,3,9*sprite,30,9,7)
 				end
 			end
 		end,
@@ -495,31 +510,7 @@ local entity_classes={
 		hearts=4,
 		-- anim=nil,
 		anim_frames=0,
-		render_layer=13,
-		gain_heart=function(self)
-			if self.hearts<4 then
-				self.hearts+=1
-				self.anim,self.anim_frames="gain",10
-			end
-		end,
-		lose_heart=function(self)
-			if self.hearts>0 then
-				self.hearts-=1
-				self.anim,self.anim_frames="lose",20
-				if self.hearts<=0 then
-					promises,is_paused,player_health.render_layer={},true,16
-					freeze_and_shake_screen(35,0)
-					spawn_entity("death_screen")
-					player_figment=spawn_entity("player_figment",player.x+23,player.y+65)
-					player_figment:promise("move",63,72,60)
-					curtains:set_anim() -- close
-					player_health:promise_sequence(
-						30,
-						{"move",62.5,45,60,ease_in_out,{-60,10,-40,10}})
-					player=player:die()
-				end
-			end
-		end
+		render_layer=13
 	},
 	boss_health={
 		-- draw
@@ -710,7 +701,7 @@ local entity_classes={
 	},
 	playing_card={
 		-- draw
-		function(self,x,y,f)
+		function(self)
 			-- some cards are red
 			if self.is_red then
 				pal(5,8)
@@ -720,15 +711,15 @@ local entity_classes={
 			-- pal(6,14)
 			-- pal(7,ternary(f%4<2,14,8))
 			-- spin counter-clockwise when moving left
-			local f2=flr(f/4)%4
+			local sprite=flr(self.frames_alive/4)%4
 			if self.vx<0 then
-				f2=(6-f2)%4
+				sprite=(6-sprite)%4
 			end
 			-- if self.vx==0 then
 			-- 	f2=3
 			-- end
 			-- draw the card
-			self:draw_sprite(5,7,10*f2+77,21,10,10)
+			self:draw_sprite(5,7,10*sprite+77,21,10,10)
 		end,
 		-- update
 		-- function(self)
@@ -737,7 +728,7 @@ local entity_classes={
 			-- end
 		-- end,
 		-- vx,is_red
-		frames_to_death=120+120,
+		frames_to_death=200,
 		hitbox_channel=1, -- player
 		is_boss_generated=true
 	},
@@ -778,27 +769,12 @@ local entity_classes={
 			if f>=30 then
 				sprite=ternary(self.health<3,5,4)
 			end
-			sspr(9*sprite,37,9,9,x-4,y-5)
+			self:draw_sprite(4,5,9*sprite,37,9,9)
 		end,
 		is_boss_generated=true,
 		health=3,
-		init=function(self)
-			self.target_x,self.target_y=10*self.target:col()-5,8*self.target:row()-4
-			self:promise_sequence(
-				{"move",self.target_x+2,self.target_y,30,ease_out,{20,-30,10,-60}},
-				2,
-				function()
-					self.occupies_tile,self.hitbox_channel=true,5 -- player, coin
-					freeze_and_shake_screen(2,2)
-				end,
-				{"move",-2,0,8,ease_in_out,{0,-4,0,-4},true},
-				function()
-					self.hitbox_channel,self.hurtbox_channel=1,4 -- player / coin
-				end)
-		end,
 		get_bumped=function(self)
-			self.health-=1
-			if self.health<=0 then
+			if decrement_counter_prop(self,"health") then
 				self:die()
 			end
 		end,
@@ -1256,6 +1232,7 @@ local entity_classes={
 			return self:promise_parallel(unpack(promises))
 		end,
 		throw_coins=function(self,target)
+			target=target or player
 			return self.right_hand:promise("move_to_temple")
 				:and_then_repeat(4,
 					{self.right_hand,"set_pose",1},
@@ -1263,7 +1240,22 @@ local entity_classes={
 					"set_all_idle",
 					ternary(i==1,24,10),
 					function()
-						add(self.coins,spawn_entity("coin",self.x+12,self.y,{target=target or player}))
+						local coin=spawn_entity("coin",self.x+12,self.y,{
+							target_x=10*target:col()-5,
+							target_y=8*target:row()-4
+						})
+						add(self.coins,coin)
+						coin:promise_sequence(
+							{"move",coin.target_x+2,coin.target_y,30,ease_out,{20,-30,10,-60}},
+							2,
+							function()
+								coin.occupies_tile,coin.hitbox_channel=true,5 -- player, coin
+								freeze_and_shake_screen(2,2)
+							end,
+							{"move",-2,0,8,ease_in_out,{0,-4,0,-4},true},
+							function()
+								coin.hitbox_channel,coin.hurtbox_channel=1,4 -- player / coin
+							end)
 					end,
 					{self.right_hand,"set_pose",4},
 					{self,"set_expression",3},
@@ -1520,7 +1512,7 @@ local entity_classes={
 		end,
 		hitbox_channel=1, -- player
 		is_boss_generated=true,
-		render_layer=9,
+		render_layer=10,
 		frames_to_death=14,
 		is_hitting=function(self,entity)
 			local dcol,dist=self:col()-entity:col(),ternary(hard_mode,1,0)
@@ -1537,7 +1529,11 @@ local entity_classes={
 		frames_to_death=150,
 		hurtbox_channel=2, -- pickup
 		on_hurt=function(self)
-			player_health:gain_heart()
+			-- gain heart
+			if player_health.hearts<4 then
+				player_health.hearts+=1
+				player_health.anim,player_health.anim_frames="gain",10
+			end
 			spawn_particle_burst(self,0,6,8,4)
 			self:die()
 		end
