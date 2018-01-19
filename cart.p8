@@ -59,17 +59,13 @@ todo:
 	hard mode
 	gameplay tweaks
 	playtesting
-
-tokens:
-	5908 entity classes
-	2258 other
 ]]
 
 -- useful noop function
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_animations=4,true
+local starting_phase,skip_phase_change_animations=1,false
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=0,0,0,0,0,1,8,0,0,1 -- ,false,false
@@ -315,7 +311,8 @@ local entity_classes={
 		-- draw
 		function(self)
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
-				local sx,sy,sh,dx,dy,facing,flipped=0,0,8,3+4*self.facing,6,self.facing,self.facing==0
+				local facing=self.facing
+				local sx,sy,sh,dx,dy,flipped=0,0,8,3+4*facing,6,facing==0
 				-- up/down sprites are below the left/right sprites in the spritesheet
 				if facing==2 then
 					sy,sh,dx=8,11,5
@@ -408,7 +405,6 @@ local entity_classes={
 			for i=0,3 do
 				if btnp(i) then
 					self:queue_step(i)
-					break
 				end
 			end
 		end,
@@ -455,25 +451,19 @@ local entity_classes={
 		end,
 		get_hurt=function(self)
 			if self.invincibility_frames<=0 then
-				score_mult=1
 				freeze_and_shake_screen(6,10)
-				self.invincibility_frames,self.stun_frames=60,19
-				-- lose heart
-				if player_health.hearts>0 then
-					player_health.hearts-=1
-					player_health.anim,player_health.anim_frames="lose",20
-					if player_health.hearts<=0 then
-						promises,is_paused,player_health.render_layer={},true,16
-						freeze_and_shake_screen(35,0)
-						spawn_entity("death_screen")
-						player_figment=spawn_entity("player_figment",player.x+23,player.y+65)
-						player_figment:move(63,72,60)
-						curtains:set_anim() -- close
-						player_health:promise_sequence(
-							30,
-							{"move",62.5,45,60,ease_in_out,{-60,10,-40,10}})
-						player=player:die()
-					end
+				player_health.anim,player_health.anim_frames,self.invincibility_frames,self.stun_frames,score_mult="lose",20,60,19,1
+				if decrement_counter_prop(player_health,"hearts") then
+					promises,is_paused,player_health.render_layer,player_figment={},true,16,spawn_entity("player_figment",player.x+23,player.y+65)
+					spawn_entity("death_screen")
+					player_figment:promise_sequence(
+						35,
+						{"move",63,72,60})
+					curtains:set_anim() -- close
+					player_health:promise_sequence(
+						65,
+						{"move",62.5,45,60,ease_in_out,{-60,10,-40,10}})
+					player:die()
 				end
 			end
 		end
@@ -534,69 +524,7 @@ local entity_classes={
 		health=0,
 		rainbow_frames=0,
 		render_layer=13,
-		drain_frames=0,
-		gain_health=function(self)
-			if self.health<60 then
-				self.health,self.visible,self.rainbow_frames=mid(0,self.health+1,60),true,15
-				local health=self.health
-				-- intro stuff
-				if boss_phase==0 then
-					if health==25 then
-						boss=spawn_entity("magic_mirror")
-					elseif health==37 then
-						boss.visible=true
-					elseif health==60 then
-						boss:intro()
-					end
-				elseif health>=60 then
-					-- once the boss is dying, just reset health to 0
-					if boss_phase>=5 then
-						self.health=0
-					-- kill the boss
-					elseif boss_phase==4 then
-						promises,boss_phase,boss_reflection={},5,boss_reflection:die()
-						local i
-						for i=1,17 do
-							spawn_magic_tile(20+13*i)
-						end
-						boss:promise_sequence(
-							"cancel_everything",
-							{"reel",60},
-							"cancel_everything",
-							{"move",40,-20,15,ease_in},
-							20,
-							function()
-								player_reflection:poof()
-								player_reflection=player_reflection:die() -- nil
-								spawn_entity("top_hat",40,-20):poof()
-							end,
-							"die",
-							120,
-							{curtains,"set_anim"}, -- close
-							100,
-							function()
-								is_paused=true
-								spawn_entity("victory_screen")
-							end)
-					-- move to next phase
-					else
-						boss:promise_sequence(
-							"cancel_everything",
-							{"reel",8},
-							10,
-							"set_expression",
-							20,
-							"phase_change",
-							spawn_magic_tile,
-							function()
-								boss_phase+=1
-							end,
-							{"return_to_ready_position",2},
-							"decide_next_action")
-					end
-				end
-			end
-		end
+		drain_frames=0
 	},
 	magic_tile_spawn={
 		-- draw
@@ -639,7 +567,7 @@ local entity_classes={
 			freeze_and_shake_screen(2,2)
 			self.hurtbox_channel,self.frames_to_death,score_mult=0,6,min(score_mult+1,8)
 			local health_change=ternary(boss_phase==0,12,7)
-			local particles=spawn_particle_burst(self,0,max(health_change,ternary(boss_phase>=5,15,25)),16,10)
+			local particles=spawn_particle_burst(self,0,ternary(boss_phase>=5,15,25),16,10)
 			local i
 			for i=1,health_change do
 				-- shuffle
@@ -651,11 +579,71 @@ local entity_classes={
 					7+2*i,
 					{"move",8+min(boss_health.health+i,60),-58,8,ease_out},
 					1,
+					"die",
+					-- gain health
 					function()
-						boss_health:gain_health()
 						-- sfx(8,1)
-					end,
-					"die")
+						if boss_health.health<60 then
+							boss_health.health,boss_health.visible,boss_health.rainbow_frames=mid(0,boss_health.health+1,60),true,15
+							local health=boss_health.health
+							-- intro stuff
+							if boss_phase==0 then
+								if health==25 then
+									boss=spawn_entity("magic_mirror")
+								elseif health==37 then
+									boss.visible=true
+								elseif health==60 then
+									boss:intro()
+								end
+							elseif health>=60 then
+								-- once the boss is dying, just reset health to 0
+								if boss_phase>=5 then
+									boss_health.health=0
+								-- kill the boss
+								elseif boss_phase==4 then
+									promises,boss_phase,boss_reflection={},5,boss_reflection:die()
+									local i
+									for i=1,17 do
+										spawn_magic_tile(20+13*i)
+									end
+									boss:promise_sequence(
+										"cancel_everything",
+										{"reel",60},
+										"cancel_everything",
+										{"move",40,-20,15,ease_in},
+										20,
+										function()
+											player_reflection:poof()
+											player_reflection=player_reflection:die() -- nil
+											spawn_entity("top_hat",40,-20):poof()
+										end,
+										"die",
+										120,
+										{curtains,"set_anim"}, -- close
+										100,
+										function()
+											is_paused=true
+											spawn_entity("victory_screen")
+										end)
+								-- move to next phase
+								else
+									boss:promise_sequence(
+										"cancel_everything",
+										{"reel",8},
+										10,
+										"set_expression",
+										20,
+										"phase_change",
+										spawn_magic_tile,
+										function()
+											boss_phase+=1
+										end,
+										{"return_to_ready_position",2},
+										"decide_next_action")
+								end
+							end
+						end
+					end)
 			end
 			-- on magic tile picked up
 			if health_change+boss_health.health<60 and boss_phase<5 then
@@ -670,7 +658,7 @@ local entity_classes={
 		function(self)
 			local prev_col,prev_row=self:col(),self:row()
 			self:copy_player()
-			if (prev_col!=self:col() or prev_row!=self:row()) and get_tile_occupant(self) and player then
+			if (prev_col!=self:col() or prev_row!=self:row()) and get_tile_occupant(self) then
 				get_tile_occupant(self):get_bumped()
 				player:bump()
 				self:copy_player()
@@ -686,17 +674,13 @@ local entity_classes={
 			self:poof()
 		end,
 		on_hurt=function(self,entity)
-			if player then
-				player:get_hurt(entity)
-				self:copy_player()
-				spawn_entity("pain",self)
-			end
+			player:get_hurt(entity)
+			self:copy_player()
+			spawn_entity("pain",self)
 		end,
 		copy_player=function(self)
-			if player then
-				self.x,self.facing=80-player.x,({1,0,2,3})[player.facing+1]
-				copy_props(player,self,{"y","step_frames","stun_frames","teeter_frames","bump_frames","invincibility_frames","frames_alive"})
-			end
+			self.x,self.facing=80-player.x,({1,0,2,3})[player.facing+1]
+			copy_props(player,self,{"y","step_frames","stun_frames","teeter_frames","bump_frames","invincibility_frames","frames_alive"})
 		end
 	},
 	playing_card={
@@ -841,24 +825,23 @@ local entity_classes={
 		end,
 		-- update
 		function(self)
+			local x,y=self.x,self.y
 			decrement_counter_prop(self,"laser_charge_frames")
 			decrement_counter_prop(self,"laser_preview_frames")
 			calc_idle_mult(self,self.frames_alive,2)
 			if boss_health.rainbow_frames>12 then
 				self.draw_offset_x+=scene_frame%2*2-1
 			end
-			self:apply_velocity()
 			-- keep mirror in bounds (for reeling purposes)
-			self.x,self.y=mid(0,self.x,80),mid(-40,self.y,-20)
+			self.x,self.y=mid(10,x,70),mid(-40,y,-20)
 			-- create particles when charging laser
 			if self.laser_charge_frames>0 then
-				local x,y,angle=self.x,self.y,rnd()
+				local angle=rnd()
 				spawn_entity("particle",x+22*cos(angle),y+22*sin(angle),{
 					color=14,
 					frames_to_death=18
 				}):move(x,y,20,ease_out)
 			end
-			return true
 		end,
 		render_layer=7,
 		x=40,
@@ -903,86 +886,88 @@ local entity_classes={
 				"decide_next_action")
 		end,
 		decide_next_action=function(self)
-			local promise=self:promise(1)
-			if boss_phase==1 then
-				promise=self:promise_sequence(
-					{"set_held_state","right"},
-					{"throw_cards","left"},
-					{"return_to_ready_position",nil,"left"},
-					{"throw_cards","right"},
-					{"return_to_ready_position",nil,"left"},
-					"shoot_lasers",
-					{"return_to_ready_position",nil,"right"})
-			elseif boss_phase==2 then
-				promise=self:promise_sequence(
-					"conjure_flowers",
-					"return_to_ready_position",
-					"throw_cards",
-					"return_to_ready_position",
-					"despawn_coins",
-					"throw_coins",
-					"return_to_ready_position",
-					"shoot_lasers",
-					"return_to_ready_position")
-			elseif boss_phase==3 then
-				promise=self:promise_sequence(
-					"shoot_lasers",
-					"return_to_ready_position",
-					"throw_cards",
-					"return_to_ready_position",
-					"conjure_flowers",
-					"return_to_ready_position",
-					"despawn_coins",
-					"throw_coins",
-					"return_to_ready_position")
-			elseif boss_phase==4 then
-				promise=self:promise_parallel(
-						{self,"set_held_state",nil},
-						{boss_reflection,"set_held_state",nil})
-					:and_then_sequence(
-				-- conjure flowers together
-					function()
-						boss_reflection:promise_sequence(
-							"return_to_ready_position",
-							32,
+			return self:promise_sequence(
+				function()
+					if boss_phase==1 then
+						return self:promise_sequence(
+							{"set_held_state","right"},
+							{self.left_hand,"throw_cards"},
+							{self,"return_to_ready_position",nil,"left"},
+							{self.right_hand,"throw_cards"},
+							{self,"return_to_ready_position",nil,"left"},
+							"shoot_lasers",
+							{"return_to_ready_position",nil,"right"})
+					elseif boss_phase==2 then
+						return self:promise_sequence(
 							"conjure_flowers",
-							"return_to_ready_position")
-					end,
-					"conjure_flowers",
-					25,
-					"conjure_flowers",
-					"return_to_ready_position",
-				-- shoot lasers + throw cards together
-					function()
-						boss_reflection:promise_sequence(
+							"return_to_ready_position",
+							"throw_cards",
+							"return_to_ready_position",
+							"despawn_coins",
+							"throw_coins",
+							"return_to_ready_position",
 							"shoot_lasers",
 							"return_to_ready_position")
-					end,
-					"throw_cards",
-					"return_to_ready_position",
-					100,
-				-- throw coins together
-					function()
-						boss_reflection:despawn_coins()
-					end,
-					"despawn_coins",
-					"throw_coins",
-					"return_to_ready_position",
-					{boss_reflection,"throw_coins",player_reflection},
-					"return_to_ready_position",
-					{self,100})
-			end
-			return promise
-				:and_then(function()
-					-- called this way so that the progressive decide_next_action
+					elseif boss_phase==3 then
+						return self:promise_sequence(
+							"shoot_lasers",
+							"return_to_ready_position",
+							"throw_cards",
+							"return_to_ready_position",
+							"conjure_flowers",
+							"return_to_ready_position",
+							"despawn_coins",
+							"throw_coins",
+							"return_to_ready_position")
+					elseif boss_phase==4 then
+						return self:promise_parallel(
+								{self,"set_held_state",nil},
+								{boss_reflection,"set_held_state",nil})
+							:and_then_sequence(
+						-- conjure flowers together
+							function()
+								boss_reflection:promise_sequence(
+									"return_to_ready_position",
+									32,
+									"conjure_flowers",
+									"return_to_ready_position")
+							end,
+							"conjure_flowers",
+							25,
+							"conjure_flowers",
+							"return_to_ready_position",
+						-- shoot lasers + throw cards together
+							function()
+								boss_reflection:promise_sequence(
+									"shoot_lasers",
+									"return_to_ready_position")
+							end,
+							"throw_cards",
+							"return_to_ready_position",
+							100,
+						-- throw coins together
+							function()
+								boss_reflection:despawn_coins()
+							end,
+							"despawn_coins",
+							"throw_coins",
+							"return_to_ready_position",
+							{boss_reflection,"throw_coins",player_reflection},
+							"return_to_ready_position",
+							{self,100})
+					end
+				end,
+				function()
+					-- called this way so that the repeated decide_next_action
 					--   calls don't result in an out of memory exception
 					self:decide_next_action()
 				end)
 		end,
 		phase_change=function(self)
 			-- music(13)
-			local lh,rh,promise=self.left_hand,self.right_hand
-			if skip_animations then
+			local lh,rh=self.left_hand,self.right_hand
+			-- todo remove this skip_phase_change_animations schtuff to save 36 tokens
+			if skip_phase_change_animations then
 				if boss_phase==0 then
 					self.is_wearing_top_hat=true
 				elseif boss_phase==2 then
@@ -991,23 +976,19 @@ local entity_classes={
 					boss_reflection=spawn_entity("magic_mirror_reflection")
 					self.home_x+=20
 				end
-				return self:promise()
 			elseif boss_phase==0 then
 				return self:promise_sequence(
 					50,
 					{lh,"appear"},
-					30,
+					30)
 				-- shake finger
-					{"set_pose",4},
-					6,
-					{"set_pose",5},
-					6,
-					{"set_pose",4},
-					6,
-					{"set_pose",5},
-					6,
-					{"set_pose",4},
-					10,
+					:and_then_repeat(3,
+						{"set_pose",5},
+						4,
+						{"set_pose",4},
+						4)
+					:and_then_sequence(
+					4,
 				-- grab handle
 					{rh,"appear"},
 					15,
@@ -1063,7 +1044,7 @@ local entity_classes={
 					{lh,"move",2,-9,20,ease_in,nil,true},
 					{self,"set_expression",3},
 					30,
-					{self,"set_expression",1},
+					{"set_expression",1},
 					15,
 				-- they vanish
 					function()
@@ -1109,24 +1090,18 @@ local entity_classes={
 		end,
 		reel=function(self,times)
 			spawn_entity("heart",10*rnd_int(3,6)-5,4)
-			if boss_phase==3 then
-				self.is_cracked=true
-			end
-			-- spawn_particle_burst(self,0,20,7,10)
+			self.is_cracked=boss_phase>=3
 			return self:promise_sequence(
 				{"set_expression",8},
 				"set_all_idle")
-				:and_then_parallel(
-					self.left_hand:promise_sequence("set_pose","appear"),
-					self.right_hand:promise_sequence("set_pose","appear")
-				)
 				:and_then_repeat(times,
 					function()
+						local r,r2=rnd_int(-7,7),rnd_int(-7,7)
 						freeze_and_shake_screen(0,3)
-						self:poof(rnd_int(-15,15),rnd_int(-15,15))
-						self.left_hand:move(rnd_int(-8,8),rnd_int(-8,8),6,ease_out,nil,true)
-						self.right_hand:move(rnd_int(-8,8),rnd_int(-8,8),6,ease_out,nil,true)
-						return self:move(rnd_int(-8,8),rnd_int(-5,2),6,ease_out,nil,true)
+						self:poof(2*r2,-2*r)
+						self.left_hand:promise_sequence("set_pose","appear",{"move",r,r2,6,ease_out,nil,true})
+						self.right_hand:promise_sequence("set_pose","appear",{"move",-r2,r,6,ease_out,nil,true})
+						return self:move(-r,r2,6,ease_out,nil,true)
 					end)
 		end,
 		conjure_flowers=function(self)
@@ -1222,14 +1197,9 @@ local entity_classes={
 				55)
 		end,
 		throw_cards=function(self,hand)
-			local promises={}
-			if hand!="right" then
-				add(promises,{self.left_hand,"throw_cards"})
-			end
-			if hand!="left" then
-				add(promises,{self.right_hand,"throw_cards"})
-			end
-			return self:promise_parallel(unpack(promises))
+			return self:promise_parallel(
+				{self.left_hand,"throw_cards"},
+				{self.right_hand,"throw_cards"})
 		end,
 		throw_coins=function(self,target)
 			target=target or player
@@ -1238,7 +1208,7 @@ local entity_classes={
 					{self.right_hand,"set_pose",1},
 					{self,"set_expression",7},
 					"set_all_idle",
-					ternary(i==1,24,10),
+					15,
 					function()
 						local coin=spawn_entity("coin",self.x+12,self.y,{
 							target_x=10*target:col()-5,
@@ -1316,11 +1286,10 @@ local entity_classes={
 				:and_then_parallel(
 					{self,"move",home_x,home_y,15,ease_in},
 					{lh,"move",home_x-18,home_y+5,15,ease_in,{-10,-10,-20,0}},
-					{rh,"move",home_x+18,home_y+5,15,ease_in,{10,-10,20,0}})
-			-- reset state
-				:and_then_parallel(
 					{lh,"appear"},
+					{rh,"move",home_x+18,home_y+5,15,ease_in,{10,-10,20,0}},
 					{rh,"appear"})
+			-- reset state
 				:and_then(self,"set_held_state",held_hand)
 		end,
 		set_held_state=function(self,held_hand)
