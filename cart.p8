@@ -65,7 +65,7 @@ todo:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations=1,false
+local starting_phase,skip_phase_change_animations,skip_title_screen=3,true,true
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=0,0,0,0,0,1,8,0,0,1 -- ,false,false
@@ -78,13 +78,43 @@ local entity_classes={
 	top_hat={
 		-- draw
 		function(self)
-			self:draw_sprite(8,1,100,9,15,12)
+			self:draw_sprite(7,1,100,9,15,12)
 		end,
 		-- update
 		function(self)
 			if self.frames_alive%15==0 then
 				spawn_entity("bunny",self,nil,{vx=ternary(rnd()<0.5,1,-1)*(1+rnd(2)),vy=-1-rnd(2)}):poof()
 			end
+		end
+	},
+	spinning_top_hat={
+		-- draw
+		function(self)
+			-- local c,r=self:col(),self:row()
+			-- rectfill(10*c-10,8*r-8,10*c,8*r,10)
+			if self.frames_alive%4<2 then
+				pal(5,8)
+			end
+			self:draw_sprite(7,10,100,9,15,12)
+		end,
+		-- update
+		function(self)
+			if not self.movement then
+				self.x=40-33*sin(self.frames_alive/50)
+			end
+			if self.frames_alive==100 then
+				self.vy=-1
+			end
+		end,
+		render_layer=9,
+		hitbox_channel=1, -- player
+		is_boss_generated=true,
+		x=40,
+		y=-32,
+		vy=1,
+		frames_to_death=200,
+		on_death=function(self)
+			boss.is_wearing_top_hat=true
 		end
 	},
 	bunny={
@@ -181,15 +211,19 @@ local entity_classes={
 		frames_until_active=5,
 		on_activated=function()
 			curtains:promise_sequence(
-				27,
+				ternary(skip_title_screen,0,27),
 				{"set_anim","open"},
 				function()
+					local n=30
+					if skip_title_screen then
+						curtains.anim_frames,n=0,0
+					end
 					entities,new_entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},{},max(0,starting_phase-1),0,1,0 -- ,false
 					player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health") -- ,nil,...
 					if starting_phase>0 then
 						boss=spawn_entity("magic_mirror")
 						boss.visible,boss_health.visible=true,true
-						boss:promise_sequence(30,"intro")
+						boss:promise_sequence(n,"intro")
 						-- todo remove debug schtuff -> 19 tokens
 						if starting_phase>1 then
 							boss.is_wearing_top_hat=true
@@ -198,7 +232,7 @@ local entity_classes={
 							player_reflection=spawn_entity("player_reflection")
 						end
 					else
-						spawn_magic_tile(180)
+						spawn_magic_tile(150+n)
 					end
 				end)
 		end
@@ -228,7 +262,7 @@ local entity_classes={
 				pal(9,8)
 				pal(4,2)
 			end
-			self:draw_sprite(40,-15,47,102,81,26)
+			self:draw_sprite(40,-15,48,96,79,25)
 			if f>35 then
 				print_centered("you did it!",x,41,15)
 			end
@@ -686,33 +720,21 @@ local entity_classes={
 	playing_card={
 		-- draw
 		function(self)
-			-- some cards are red
-			if self.is_red then
-				pal(5,8)
-				pal(6,15)
-			end
-			-- pal(5,7)
-			-- pal(6,14)
-			-- pal(7,ternary(f%4<2,14,8))
 			-- spin counter-clockwise when moving left
 			local sprite=flr(self.frames_alive/4)%4
 			if self.vx<0 then
 				sprite=(6-sprite)%4
 			end
-			-- if self.vx==0 then
-			-- 	f2=3
-			-- end
+			-- some cards are red
+			if self.is_red then
+				pal(5,8)
+				pal(6,15)
+			end
 			-- draw the card
 			self:draw_sprite(5,7,10*sprite+77,21,10,10)
 		end,
-		-- update
-		-- function(self)
-			-- if self.vx!=0 and self.frames_alive%5==4 and player and self.vx*(self:col()-player:col())>=0 then
-			-- 	self.vx,self.vy=0,ternary(player.y<self.y,-1,1)
-			-- end
-		-- end,
 		-- vx,is_red
-		frames_to_death=200,
+		frames_to_death=100,
 		hitbox_channel=1, -- player
 		is_boss_generated=true
 	},
@@ -749,8 +771,8 @@ local entity_classes={
 		-- draw
 		function(self,x,y,f)
 			circfill(self.target_x,self.target_y-1,min(flr(f/7),4),2)
-			local sprite=ternary(f>20,2,0)+flr(f/3)%2
-			if f>=30 then
+			local sprite=ternary(f>10,2,0)+flr(f/3)%2
+			if f>=26 then
 				sprite=ternary(self.health<3,5,4)
 			end
 			self:draw_sprite(4,5,9*sprite,37,9,9)
@@ -832,8 +854,6 @@ local entity_classes={
 			if boss_health.rainbow_frames>12 then
 				self.draw_offset_x+=scene_frame%2*2-1
 			end
-			-- keep mirror in bounds (for reeling purposes)
-			self.x,self.y=mid(10,x,70),mid(-40,y,-20)
 			-- create particles when charging laser
 			if self.laser_charge_frames>0 then
 				local angle=rnd()
@@ -910,12 +930,13 @@ local entity_classes={
 							"return_to_ready_position")
 					elseif boss_phase==3 then
 						return self:promise_sequence(
-							"shoot_lasers",
+							-- "shoot_lasers",
+							-- "return_to_ready_position",
+							-- "throw_cards",
+							-- "return_to_ready_position",
+							-- "conjure_flowers",
 							"return_to_ready_position",
-							"throw_cards",
-							"return_to_ready_position",
-							"conjure_flowers",
-							"return_to_ready_position",
+							"throw_hat",
 							"despawn_coins",
 							"throw_coins",
 							"return_to_ready_position")
@@ -1096,6 +1117,7 @@ local entity_classes={
 				"set_all_idle")
 				:and_then_repeat(times,
 					function()
+						self.x,self.y=mid(10,self.x,70),mid(-40,self.y,-20)
 						local r,r2=rnd_int(-7,7),rnd_int(-7,7)
 						freeze_and_shake_screen(0,3)
 						self:poof(2*r2,-2*r)
@@ -1103,6 +1125,20 @@ local entity_classes={
 						self.right_hand:promise_sequence("set_pose","appear",{"move",-r2,r,6,ease_out,nil,true})
 						return self:move(-r,r2,6,ease_out,nil,true)
 					end)
+		end,
+		throw_hat=function(self)
+			return self:promise_sequence(
+				"set_all_idle",
+				{self.right_hand,"move",self.x+5,self.y-6,15,linear},
+				{"set_pose",1},
+				30,
+				"set_pose",
+				function()
+					self.is_wearing_top_hat=false
+					spawn_entity("spinning_top_hat")
+				end,
+				{"move",25,5,4,ease_in,nil,true},
+				30)
 		end,
 		conjure_flowers=function(self)
 			-- generate a list of flower locations
@@ -1203,20 +1239,21 @@ local entity_classes={
 		end,
 		throw_coins=function(self,target)
 			target=target or player
-			return self.right_hand:promise("move_to_temple")
+			return self:promise_sequence(
+				"set_all_idle",
+				{self.right_hand,"move_to_temple"})
 				:and_then_repeat(4,
 					{self.right_hand,"set_pose",1},
 					{self,"set_expression",7},
-					"set_all_idle",
 					15,
 					function()
-						local coin=spawn_entity("coin",self.x+12,self.y,{
+						local coin=spawn_entity("coin",self.x+13,self.y-6,{
 							target_x=10*target:col()-5,
 							target_y=8*target:row()-4
 						})
 						add(self.coins,coin)
 						coin:promise_sequence(
-							{"move",coin.target_x+2,coin.target_y,30,ease_out,{20,-30,10,-60}},
+							{"move",coin.target_x+2,coin.target_y,25,ease_out,{20,-30,10,-60}},
 							2,
 							function()
 								coin.occupies_tile,coin.hitbox_channel=true,5 -- player, coin
@@ -1385,9 +1422,8 @@ local entity_classes={
 		idle_mult=0,
 		-- highest-level commands
 		throw_cards=function(self)
-			local dir=self.dir
-			local promise=self:promise_sequence(
-				8-dir*8,
+			local dir,promise=self.dir,self:promise_sequence(
+				ternary(self.is_right_hand,0,ternary(hard_mode,13,19)),
 				function()
 					self.is_idle=false
 				end)
@@ -1396,21 +1432,18 @@ local entity_classes={
 				promise=promise:and_then_sequence(
 					-- move to the correct row
 					"set_pose",
-					{"move",40+50*dir,8*(r%5)+4,18,ease_out_in,{10*dir,-10,10*dir,10}},
+					{"move",40+52*dir,8*(r%5)+4,18,ease_out_in,{10*dir,-10,10*dir,10}},
 					{"set_pose",2},
-					6,
+					ternary(hard_mode,0,12),
 					-- throw the card
 					{"set_pose",1},
 					function()
 						spawn_entity("playing_card",self.x-7*dir,self.y,{
-							vx=-2*dir,
+							vx=-1.5*dir,
 							is_red=rnd()<0.5
 						})
 					end,
-					6,
-					-- pause
-					{"set_pose",2},
-					3)
+					10)
 			end
 			return promise
 		end,
@@ -1541,6 +1574,11 @@ function _init()
 	title_screen,curtains=spawn_entity("title_screen"),spawn_entity("curtains")
 	-- immediately add new entities to the game
 	entities,new_entities={title_screen,curtains},{}
+	-- skip title screen maybe
+	if skip_title_screen then
+		title_screen.x,title_screen.is_activated,curtains.anim=-200,true,"open"
+		title_screen:on_activated()
+	end
 end
 
 function _update()
