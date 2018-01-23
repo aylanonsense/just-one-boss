@@ -65,7 +65,7 @@ todo:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations,skip_title_screen=3,true,true
+local starting_phase,skip_phase_change_animations,skip_title_screen=4,true,true
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=0,0,0,0,0,1,8,0,0,1 -- ,false,false
@@ -857,10 +857,10 @@ local entity_classes={
 			-- create particles when charging laser
 			if self.laser_charge_frames>0 then
 				local angle=rnd()
-				spawn_entity("particle",x+22*cos(angle),y+22*sin(angle),{
+				spawn_entity("particle",x+18*self.vx+22*cos(angle),y+22*sin(angle),{
 					color=14,
 					frames_to_death=18
-				}):move(x,y,20,ease_out)
+				}):move(x+18*self.vx,y,20,ease_out)
 			end
 		end,
 		render_layer=7,
@@ -913,9 +913,11 @@ local entity_classes={
 							{"set_held_state","right"},
 							{self.left_hand,"throw_cards"},
 							{self,"return_to_ready_position",nil,"left"},
+							10,
 							{self.right_hand,"throw_cards"},
 							{self,"return_to_ready_position",nil,"left"},
-							"shoot_lasers",
+							25,
+							{"shoot_lasers",true},
 							{"return_to_ready_position",nil,"right"})
 					elseif boss_phase==2 then
 						return self:promise_sequence(
@@ -923,20 +925,19 @@ local entity_classes={
 							"return_to_ready_position",
 							"throw_cards",
 							"return_to_ready_position",
+							"shoot_lasers",
+							"return_to_ready_position",
 							"despawn_coins",
 							"throw_coins",
-							"return_to_ready_position",
-							"shoot_lasers",
 							"return_to_ready_position")
 					elseif boss_phase==3 then
 						return self:promise_sequence(
-							-- "shoot_lasers",
-							-- "return_to_ready_position",
-							-- "throw_cards",
-							-- "return_to_ready_position",
-							-- "conjure_flowers",
+							"shoot_lasers",
 							"return_to_ready_position",
-							"throw_hat",
+							"throw_cards",
+							"return_to_ready_position",
+							"conjure_flowers",
+							"return_to_ready_position",
 							"despawn_coins",
 							"throw_coins",
 							"return_to_ready_position")
@@ -957,25 +958,38 @@ local entity_classes={
 							25,
 							"conjure_flowers",
 							"return_to_ready_position",
-						-- shoot lasers + throw cards together
+						-- throw cards together
 							function()
 								boss_reflection:promise_sequence(
-									"shoot_lasers",
+									84,
+									"throw_cards",
 									"return_to_ready_position")
 							end,
 							"throw_cards",
 							"return_to_ready_position",
 							100,
+						-- shoot lasers together
+							function()
+								boss_reflection:promise_sequence(
+									30,
+									"shoot_lasers",
+									"return_to_ready_position")
+							end,
+							"shoot_lasers",
+							"return_to_ready_position",
+							80,
 						-- throw coins together
 							function()
-								boss_reflection:despawn_coins()
+								boss_reflection:promise_sequence(
+									"despawn_coins",
+									17,
+									{"throw_coins",player_reflection},
+									"return_to_ready_position")
 							end,
 							"despawn_coins",
 							"throw_coins",
 							"return_to_ready_position",
-							{boss_reflection,"throw_coins",player_reflection},
-							"return_to_ready_position",
-							{self,100})
+							100)
 					end
 				end,
 				function()
@@ -1266,9 +1280,9 @@ local entity_classes={
 					end,
 					{self.right_hand,"set_pose",4},
 					{self,"set_expression",3},
-					20)
+					ternary(boss_phase>=4,21,20))
 		end,
-		shoot_lasers=function(self)
+		shoot_lasers=function(self,stationary)
 			self.left_hand.visible=false
 			self.left_hand:poof()
 			local col=rnd_int(0,7)
@@ -1282,24 +1296,31 @@ local entity_classes={
 							-- move to a random column
 							{"move",10*col+5,-20,15,ease_in,{0,-10,0,-10}},
 							-- charge a laser
+							1,
 							function()
+								if not stationary then
+									local dir=2
+									if col>5 or (rnd()<0.5 and col>1) then
+										dir=-2
+									end
+									col+=dir
+									self:move(10*dir,0,40,linear,nil,true)
+								end
 								self.laser_charge_frames=10
-								-- sfx(13,3)
 							end,
-							14,
+							24,
 							"preview_laser",
-							6,
 							-- shoot a laser
 							{"set_expression",0},
 							function()
 								freeze_and_shake_screen(0,4)
-								spawn_entity("mirror_laser",self)
+								spawn_entity("mirror_laser",self,nil,{parent=self})
 							end,
-							14,
+							16,
 							-- cooldown
 							"set_expression",
 							"preview_laser",
-							6)
+							5)
 					end)
 		end,
 		preview_laser=function(self)
@@ -1428,7 +1449,7 @@ local entity_classes={
 					self.is_idle=false
 				end)
 			local r
-			for r=ternary(self.is_right_hand,0,1),9,2 do
+			for r=ternary(self.is_right_hand,0,1),4,2 do
 				promise=promise:and_then_sequence(
 					-- move to the correct row
 					"set_pose",
@@ -1512,10 +1533,14 @@ local entity_classes={
 				sspr(117,30,11,1,x-4.5,y+4.5,11,100)
 			end
 		end,
+		-- update
+		function(self)
+			self.x=self.parent.x
+		end,
 		hitbox_channel=1, -- player
 		is_boss_generated=true,
 		render_layer=10,
-		frames_to_death=14,
+		frames_to_death=16,
 		is_hitting=function(self,entity)
 			local dcol,dist=self:col()-entity:col(),ternary(hard_mode,1,0)
 			return dcol==mid(-dist,dcol,dist)
