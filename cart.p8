@@ -65,7 +65,7 @@ todo:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations,skip_title_screen=4,true,true
+local starting_phase,skip_phase_change_animations,skip_title_screen=1,true,true
 
 -- global scene vars
 local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=0,0,0,0,0,1,8,0,0,1 -- ,false,false
@@ -788,6 +788,23 @@ local entity_classes={
 			spawn_particle_burst(self,0,6,6,4)
 		end
 	},
+	coin_slam={
+		-- draw
+		function(self)
+			pset(self.x,self.y,8)
+			-- 0 = left, 1 = right, 2 = up, 3 = down
+			self:draw_sprite(5,3,ternary(self.dir>1,47,58),71,11,7,self.dir==0,self.dir==2)
+		end,
+		-- update
+		function(self)
+			if self.frames_alive>1 then
+				self.hitbox_channel=0
+			end
+		end,
+		frames_to_death=7,
+		render_layer=4,
+		hitbox_channel=1 -- player
+	},
 	particle={
 		-- draw
 		function(self,x,y)
@@ -823,7 +840,7 @@ local entity_classes={
 				if boss_health.rainbow_frames>0 then
 					color_wash(rainbow_color)
 					if expression>0 and boss_phase>0 then
-						pal(13,3)
+						pal(13,5)
 					end
 					expression=8
 				end
@@ -856,11 +873,11 @@ local entity_classes={
 			end
 			-- create particles when charging laser
 			if self.laser_charge_frames>0 then
-				local angle=rnd()
-				spawn_entity("particle",x+18*self.vx+22*cos(angle),y+22*sin(angle),{
+				local angle,n=rnd(),ternary(hard_mode,8,18)
+				spawn_entity("particle",x+n*self.vx+22*cos(angle),y+22*sin(angle),{
 					color=14,
-					frames_to_death=18
-				}):move(x+18*self.vx,y,20,ease_out)
+					frames_to_death=n
+				}):move(x+n*self.vx,y,n+2,ease_out)
 			end
 		end,
 		render_layer=7,
@@ -871,10 +888,12 @@ local entity_classes={
 		expression=4,
 		laser_charge_frames=0,
 		laser_preview_frames=0,
+		dark_color=14,
+		light_color=15,
 		idle_mult=0,
 		-- visible=false,
 		init=function(self)
-			local props,y={mirror=self,is_reflection=self.is_reflection},self.y+5
+			local props,y={mirror=self,is_reflection=self.is_reflection,dark_color=self.dark_color,light_color=self.light_color},self.y+5
 			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,y,props)
 			self.coins,self.flowers,props.is_right_hand,props.dir={},{},true,1
 			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,y,props)
@@ -888,9 +907,9 @@ local entity_classes={
 			pal(2,ternary(self.is_cracked,6,7))
 			-- reflected mirror gets a green tone
 			if self.is_reflection then
-				color_wash(3)
-				pal(7,11)
-				pal(6,11)
+				color_wash(self.dark_color)
+				pal(7,self.light_color)
+				pal(6,self.light_color)
 			end
 		end,
 		-- highest-level commands
@@ -909,16 +928,28 @@ local entity_classes={
 			return self:promise_sequence(
 				function()
 					if boss_phase==1 then
-						return self:promise_sequence(
-							{"set_held_state","right"},
-							{self.left_hand,"throw_cards"},
-							{self,"return_to_ready_position",nil,"left"},
-							10,
-							{self.right_hand,"throw_cards"},
-							{self,"return_to_ready_position",nil,"left"},
-							25,
-							{"shoot_lasers",true},
-							{"return_to_ready_position",nil,"right"})
+						if hard_mode then
+							return self:promise_sequence(
+								-- "return_to_ready_position",
+								-- "throw_cards",
+								"return_to_ready_position",
+								{"shoot_lasers",true,true},
+								"return_to_ready_position",
+								"despawn_coins",
+								"throw_coins",
+								"return_to_ready_position")
+						else
+							return self:promise_sequence(
+								{"set_held_state","right"},
+								{self.left_hand,"throw_cards"},
+								{self,"return_to_ready_position",nil,"left"},
+								10,
+								{self.right_hand,"throw_cards"},
+								{self,"return_to_ready_position",nil,"left"},
+								25,
+								{"shoot_lasers",true},
+								{"return_to_ready_position",nil,"right"})
+						end
 					elseif boss_phase==2 then
 						return self:promise_sequence(
 							"conjure_flowers",
@@ -1259,12 +1290,10 @@ local entity_classes={
 				:and_then_repeat(4,
 					{self.right_hand,"set_pose",1},
 					{self,"set_expression",7},
-					15,
+					ternary(hard_mode,5,15),
 					function()
-						local coin=spawn_entity("coin",self.x+13,self.y-6,{
-							target_x=10*target:col()-5,
-							target_y=8*target:row()-4
-						})
+						local target_x,target_y=10*target:col()-5,8*target:row()-4
+						local coin=spawn_entity("coin",self.x+13,self.y-6,{target_x=target_x,target_y=target_y})
 						add(self.coins,coin)
 						coin:promise_sequence(
 							{"move",coin.target_x+2,coin.target_y,25,ease_out,{20,-30,10,-60}},
@@ -1272,6 +1301,20 @@ local entity_classes={
 							function()
 								coin.occupies_tile,coin.hitbox_channel=true,5 -- player, coin
 								freeze_and_shake_screen(2,2)
+								if hard_mode then
+									if target_x>5 then
+										spawn_entity("coin_slam",target_x-10,target_y,{dir=0})
+									end
+									if target_x<75 then
+										spawn_entity("coin_slam",target_x+10,target_y,{dir=1})
+									end
+									if target_y>4 then
+										spawn_entity("coin_slam",target_x,target_y-8,{dir=2})
+									end
+									if target_y<36 then
+										spawn_entity("coin_slam",target_x,target_y+8,{dir=3})
+									end
+								end
 							end,
 							{"move",-2,0,8,ease_in_out,{0,-4,0,-4},true},
 							function()
@@ -1282,21 +1325,21 @@ local entity_classes={
 					{self,"set_expression",3},
 					ternary(boss_phase>=4,21,20))
 		end,
-		shoot_lasers=function(self,stationary)
+		shoot_lasers=function(self,stationary,add_reflections)
 			self.left_hand.visible=false
 			self.left_hand:poof()
-			local col=rnd_int(0,7)
+			local col,num_reflections,reflection_color=rnd_int(0,7),2,rnd_int(3,5)
 			return self:promise_sequence(
 				{"set_held_state","right"},
 				"set_expression",
 				"set_all_idle"):and_then_repeat(3,
 					function()
-						col=(col+rnd_int(2,6))%8
+						col=(col+rnd_int(2,ternary(add_reflections,3,6)))%8
 						return self:promise_sequence(
 							-- move to a random column
-							{"move",10*col+5,-20,15,ease_in,{0,-10,0,-10}},
-							-- charge a laser
+							{"move",10*col+5,-20,ternary(hard_mode,10,15),ease_in,{0,-10,0,-10}},
 							1,
+							-- charge a laser
 							function()
 								if not stationary then
 									local dir=2
@@ -1306,25 +1349,42 @@ local entity_classes={
 									col+=dir
 									self:move(10*dir,0,40,linear,nil,true)
 								end
-								self.laser_charge_frames=10
 							end,
-							24,
-							"preview_laser",
-							-- shoot a laser
-							{"set_expression",0},
+							"shoot_laser",
 							function()
-								freeze_and_shake_screen(0,4)
-								spawn_entity("mirror_laser",self,nil,{parent=self})
-							end,
-							16,
-							-- cooldown
-							"set_expression",
-							"preview_laser",
-							5)
+								if add_reflections and num_reflections>0 then
+									local reflection=spawn_entity("magic_mirror_reflection",nil,nil,{color_index=reflection_color-num_reflections})
+									reflection:promise():and_then_repeat(num_reflections,
+											10,
+											"shoot_laser")
+										:and_then(
+										"die")
+									num_reflections-=1
+								end
+							end)
 					end)
 		end,
+		shoot_laser=function(self)
+			return self:promise_sequence(
+					function()
+						self.laser_charge_frames=10
+					end,
+					ternary(hard_mode,9,19),
+					"preview_laser",
+					-- shoot a laser
+					{"set_expression",0},
+					function()
+						freeze_and_shake_screen(0,4)
+						spawn_entity("mirror_laser",self,nil,{parent=self,dark_color=self.dark_color,light_color=self.light_color})
+					end,
+					16,
+					-- cooldown
+					"set_expression",
+					"preview_laser")
+		end,
 		preview_laser=function(self)
-			self.laser_preview_frames=6
+			self.laser_preview_frames=5
+			return 5
 		end,
 		return_to_ready_position=function(self,expression,held_hand)
 			local lh,rh,home_x,home_y=self.left_hand,self.right_hand,self.home_x,self.home_y
@@ -1390,9 +1450,13 @@ local entity_classes={
 		is_wearing_top_hat=true,
 		home_x=20,
 		is_reflection=true,
+		color_index=1,
 		init=function(self)
+			self.dark_color=({3,8,13,9})[self.color_index]
+			self.light_color=({11,14,12,10})[self.color_index]
 			boss.init(self)
 			local props={"pose","x","y","visible"}
+			copy_props(boss,self,{"x","y","expression"})
 			copy_props(boss.left_hand,self.left_hand,props)
 			copy_props(boss.right_hand,self.right_hand,props)
 		end
@@ -1407,9 +1471,9 @@ local entity_classes={
 				end
 				-- reflections get a green tone
 				if self.is_reflection then
-					color_wash(3)
-					pal(7,11)
-					pal(6,11)
+					color_wash(self.dark_color)
+					pal(7,self.light_color)
+					pal(6,self.light_color)
 				end
 				-- draw the hand
 				local is_right_hand=self.is_right_hand
@@ -1526,12 +1590,9 @@ local entity_classes={
 	mirror_laser={
 		-- draw
 		function(self,x,y)
-			if hard_mode then
-				self:draw_sprite(15,-3,96,90,31,5)
-				sspr(96,95,31,1,x-14.5,y+8.5,31,100)
-			else
-				sspr(117,30,11,1,x-4.5,y+4.5,11,100)
-			end
+			pal(14,self.dark_color)
+			pal(15,self.light_color)
+			sspr(117,30,11,1,x-4.5,y+4.5,11,100)
 		end,
 		-- update
 		function(self)
@@ -1542,8 +1603,7 @@ local entity_classes={
 		render_layer=10,
 		frames_to_death=16,
 		is_hitting=function(self,entity)
-			local dcol,dist=self:col()-entity:col(),ternary(hard_mode,1,0)
-			return dcol==mid(-dist,dcol,dist)
+			return self:col()==entity:col()
 		end
 	},
 	heart={
@@ -1603,6 +1663,7 @@ function _init()
 	if skip_title_screen then
 		title_screen.x,title_screen.is_activated,curtains.anim=-200,true,"open"
 		title_screen:on_activated()
+		hard_mode=true
 	end
 end
 
@@ -2253,13 +2314,13 @@ __gfx__
 06772777760077d277d7700667277766007667777770076776767600ddddddddd0067277777600677277776009ff7ff7000002222000a0000a00000000000000
 006677766000077277770000666666600007777777000076776670000ddddddd000066777660000666666600fff7f7f0000002222000a0000000000000000000
 00006660000000066600000000666000000007770000000076700000000ddd00000000666000000006660000f77f7f0000000222200a00000000000000000000
-00006666666066660000660006666666660066666666666222222222222222222222222222222222222222207777777777000000000000088000800000030000
-000000660600606000066660666000006660660060600662222222222222222222222222222222222222222777777777777ff880000088888b088e0088030880
-000000060600606000060660660000000660600060600062222222222222222222222222222222222222222777077777777ff8188888188883b8888088008880
-0000000606006060000000606660000606600600606006622222222222222222222222222222222222222227e777777777770080000080bb3133880008838000
-000000060600606000000060060600006600660060600602222222222222222222222222222222222222222077777777777700800800800088833b0330383000
-000000060600606000000060006060000000000060600002222222222222222222222222222222222222222fff777f7777770080000080038e8b000008830000
-000000060600606000000060000606000000000060600002222222222222222222222222222222222222222ff07700f9777778188888183b888bb00008800300
+00006666666066660000660006666666660066666666666000000000000000900900022222222222222222207777777777000000000000088000800000030000
+000000660600606000066660666000006660660060600660009999900009000900900222222222222222222777777777777ff880000088888b088e0088030880
+000000060600606000060660660000000660600060600060900000009000900900900222222222222222222777077777777ff8188888188883b8888088008880
+0000000606006060000000606660000606600600606006600999999900009009009002222222222222222227e777777777770080000080bb3133880008838000
+000000060600606000000060060600006600660060600609000000000900900900900222222222222222222077777777777700800800800088833b0330383000
+000000060600606000000060006060000000000060600000999999999009000900900222222222222222222fff777f7777770080000080038e8b000008830000
+000000060600606000000060000606000000000060600000000000000000009009000222222222222222222ff07700f9777778188888183b888bb00008800300
 00000006060060600000006000006060000000006060000222222222222222222222222222222222222222200000000f99777880000088000b30000000000030
 00000006060060600000006000000606000000006060000555511111111111111111111111111111111111111111111111111111111111111111111111115555
 066000060600606000000060066000606000000060600005000000077770000000500000000000880880000000002222222222222222220003b1330222222225
@@ -2272,12 +2333,12 @@ __gfx__
 22222222222222222222222222222222222222222222222100777077700000000050000000000000077000000000222222222222222222222222222ddddddd01
 0000666666600000666660000006600066666666666666610077777e700000000053b0ff0777700077f0077770002222222222222222222222222220000dd001
 000666000006000006666000006666006066600000000661007777770000000000943bff777777707f7077ff70002222222222222222222222222220000d0001
-0066600000006000066666000060660060660000000006610077777770000000004930077777777f7f07f900000022220000000fff77777777777fff00000001
-060660000000660006606600000006006066000000006601007777ff7ff0000000990307777777777f7f0000000022220000effff7777777777777ffffe00001
-060600000000660006606660000006006066000000000661007f77f777f000000099000777777777777700000000222200eefff77777777777777777fffee001
-060600000000060006660660000006006066000000000001007ffff7770000000099000777f7777707770000000022220eeffff77777777777777777ffffee01
-6066000000000660060606660000060060660000000000010077f777770000000009000f77ff77f777e79949b03022220eefff7777777777777777777fffee01
-606600000000066006066066000006006066000000000001007797777700000000000000f777977f777999943b032222eeffff7777777777777777777ffffee1
+0066600000006000066666000060660060660000000006610077777770000000004930077777777f7f07f9000000222222222222222222222222222222222221
+060660000000660006606600000006006066000000006601007777ff7ff0000000990307777777777f7f00000000222222222222222222222222222222222221
+060600000000660006606660000006006066000000000661007f77f777f000000099000777777777777700000000222222222222222222222222222222222221
+060600000000060006660660000006006066000000000001007ffff7770000000099000777f77777077700000000222222222222222222222222222222222221
+6066000000000660060606660000060060660000000000010077f777770000000009000f77ff77f777e79949b030222222222222222222222222222222222221
+606600000000066006066066000006006066000000000001007797777700000000000000f777977f777999943b03222222222222222222222222222222222221
 60660000000006600600606660000600606600000000000100000000000000000000000000000000009990099999990000000000000000000000000000000001
 60660000000006600600660660000600606600000600000100000000000000000000000000099900099909009090099000000099000000000000000000000001
 60660000000006600600060666000600606666666600000100000000000000000000090000909900099000909090009900000990900999000000000000000001
