@@ -63,16 +63,31 @@ todo:
 expected tokens for music/sound effects: 113
 that means token limit before sounds is: 8079
 
-considering features to cut
-	thrown hat:					138
-	different laser colors:		12
+58 tokens can be saved by switching from entity names to entity ids
+32 tokens can be saved by getting rid of skip_title_screen
+41 tokens can be saved by getting rid of skip_phase_change_animations
+
+where are tokens being used?
+	magic_mirror class				2262 tokens
+		decide_next_action method		237 tokens
+		phase_change method				398 tokens
+	other classes					1523 tokens
+	global utility functions		988 tokens
+	player class					685 tokens
+	screen classes					662 tokens
+	spawn_entity funtion			614 tokens
+	magic_mirror_hand class			555 tokens
+	primary pico-8 functions		487 tokens
+	magic_tile class				357 tokens
+	global variable declarations	48 tokens
+
 ]]
 
 -- useful noop function
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations,skip_title_screen=4,false,true
+local starting_phase,skip_phase_change_animations,skip_title_screen=1,false,true
 
 -- global scene vars
 local next_reflection_color,scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=1,0,0,0,0,0,1,8,0,0,1 -- ,false,false
@@ -82,7 +97,8 @@ local promises,entities,title_screen,player,player_health,player_reflection,play
 
 -- global entities classes
 local entity_classes={
-	top_hat={
+	-- entity 1: top_hat
+	{
 		-- draw
 		function(self)
 			self:draw_sprite(7,1,100,9,15,12)
@@ -90,11 +106,13 @@ local entity_classes={
 		-- update
 		function(self)
 			if self.frames_alive%15==0 then
-				spawn_entity("bunny",self,nil,{vx=ternary(rnd()<0.5,1,-1)*(1+rnd(2)),vy=-1-rnd(2)}):poof()
+				-- entity 3: bunny
+				spawn_entity(3,self,nil,{vx=ternary(rnd()<0.5,1,-1)*(1+rnd(2)),vy=-1-rnd(2)}):poof()
 			end
 		end
 	},
-	spinning_top_hat={
+	-- entity 2: spinning_top_hat
+	{
 		-- draw
 		function(self)
 			-- local c,r=self:col(),self:row()
@@ -116,7 +134,8 @@ local entity_classes={
 		vy=1,
 		frames_to_death=120
 	},
-	bunny={
+	-- entity 3: bunny
+	{
 		-- draw
 		function(self)
 			self:draw_sprite(7,7,87,67,14,12,self.vx>0)
@@ -127,7 +146,8 @@ local entity_classes={
 		end,
 		frames_to_death=100
 	},
-	curtains={
+	-- entity 4: curtains
+	{
 		-- draw
 		function(self)
 			self:draw_curtain(1,1)
@@ -157,7 +177,8 @@ local entity_classes={
 			self.anim,self.anim_frames=anim,100
 		end
 	},
-	screen={
+	-- entity 5: screen
+	{
 		-- draw
 		noop,
 		-- update
@@ -187,7 +208,8 @@ local entity_classes={
 		end,
 		on_activated=noop
 	},
-	title_screen={
+	-- entity 6: title_screen
+	{
 		-- draw
 		function(self)
 			self:draw_sprite(23,-26,0,71,47,16)
@@ -206,7 +228,7 @@ local entity_classes={
 				slide(self,-1):on_activated()
 			end
 		end,
-		extends="screen",
+		extends=5, -- entity 5: screen
 		frames_until_active=5,
 		on_activated=function()
 			curtains:promise_sequence(
@@ -218,10 +240,14 @@ local entity_classes={
 						curtains.anim_frames,n=0,0
 					end
 					entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},max(0,starting_phase-1),0,1,0 -- ,false
-					player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health") -- ,nil,...
+					-- entity 11: player
+					-- entity 12: player_health
+					-- entity 13: boss_health
+					player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity(11),spawn_entity(12),spawn_entity(13) -- ,nil,...
 					hard_mode=true -- todo debug remove
 					if starting_phase>0 then
-						boss=spawn_entity("magic_mirror")
+						-- entity 22: magic_mirror
+						boss=spawn_entity(22)
 						boss.visible,boss_health.visible=true,true
 						boss:promise_sequence(n,"intro")
 						-- todo remove debug schtuff -> 19 tokens
@@ -229,7 +255,8 @@ local entity_classes={
 							boss.is_wearing_top_hat=true
 						end
 						if starting_phase>3 then
-							player_reflection=spawn_entity("player_reflection")
+							-- entity 16: player_reflection
+							player_reflection=spawn_entity(16)
 						end
 					else
 						spawn_magic_tile(150+n)
@@ -237,7 +264,8 @@ local entity_classes={
 				end)
 		end
 	},
-	credit_screen={
+	-- entity 7: credit_screen
+	{
 		-- draw
 		function(self,x)
 			print_centered("thank you for playing!",x,28,rainbow_color)
@@ -247,14 +275,15 @@ local entity_classes={
 			self:draw_sprite(11,-43,ternary(hard_mode,70,48),80,22,16)
 			self:draw_prompt("continue")
 		end,
-		extends="screen",
+		extends=5, -- entity 5: screen
 		x=188,
 		frames_until_active=130,
 		on_activated=function(self)
 			show_title_screen()
 		end
 	},
-	victory_screen={
+	-- entity 8: victory_screen
+	{
 		-- draw
 		function(self,x,y,f)
 			-- congratulations
@@ -308,10 +337,11 @@ local entity_classes={
 			end
 			self:check_for_activation()
 		end,
-		extends="screen",
+		extends=5, -- entity 5: screen
 		frames_until_active=195,
 		on_activated=function(self)
-			slide(spawn_entity("credit_screen"))
+			-- entity 7: credit_screen
+			slide(spawn_entity(7))
 		end,
 		draw_score=function(self,x,y,label_text,score_text,time_text)
 			print(label_text,x-42.5,y,7)
@@ -320,12 +350,13 @@ local entity_classes={
 			draw_sprite(x+18,y,95,16,5,5)
 		end
 	},
-	death_screen={
+	-- entity 9: death_screen
+	{
 		-- draw
 		function(self)
 			self:draw_prompt("continue")
 		end,
-		extends="screen",
+		extends=5, -- entity 5: screen
 		frames_until_active=120,
 		on_activated=function(self)
 			slide(player_health)
@@ -333,7 +364,8 @@ local entity_classes={
 			show_title_screen()
 		end
 	},
-	player_figment={
+	-- entity 10: player_figment
+	{
 		-- draw
 		function(self)
 			self:draw_sprite(5,6,88,ternary(self.frames_alive<120,8,0),11,8)
@@ -341,7 +373,8 @@ local entity_classes={
 		is_pause_immune=true,
 		render_layer=17
 	},
-	player={
+	-- entity 11: player
+	{
 		-- draw
 		function(self)
 			if self.invincibility_frames%4<2 or self.stun_frames>0 then
@@ -480,7 +513,8 @@ local entity_classes={
 			end
 		end,
 		on_hurt=function(self)
-			spawn_entity("pain",self)
+			-- entity 28: pain
+			spawn_entity(28,self)
 			self:get_hurt()
 		end,
 		get_hurt=function(self)
@@ -488,8 +522,10 @@ local entity_classes={
 				freeze_and_shake_screen(6,10)
 				player_health.anim,player_health.anim_frames,self.invincibility_frames,self.stun_frames,score_mult="lose",20,60,19,1
 				if decrement_counter_prop(player_health,"hearts") then
-					promises,is_paused,player_health.render_layer,player_figment={},true,16,spawn_entity("player_figment",player.x+23,player.y+65)
-					spawn_entity("death_screen")
+					-- entity 10: player_figment
+					promises,is_paused,player_health.render_layer,player_figment={},true,16,spawn_entity(10,player.x+23,player.y+65)
+					-- entity 9: death_screen
+					spawn_entity(9)
 					player_figment:promise_sequence(
 						35,
 						{"move",63,72,60})
@@ -502,7 +538,8 @@ local entity_classes={
 			end
 		end
 	},
-	player_health={
+	-- entity 12: player_health
+	{
 		-- draw
 		function(self)
 			if self.visible then
@@ -536,7 +573,8 @@ local entity_classes={
 		anim_frames=0,
 		render_layer=13
 	},
-	boss_health={
+	-- entity 13: boss_health
+	{
 		-- draw
 		function(self)
 			if self.visible then
@@ -560,7 +598,8 @@ local entity_classes={
 		render_layer=13,
 		drain_frames=0
 	},
-	magic_tile_spawn={
+	-- entity 14: magic_tile_spawn
+	{
 		-- draw
 		function(self,x,y,f,f2)
 			if f2==10 then
@@ -574,11 +613,13 @@ local entity_classes={
 		frames_to_death=10,
 		on_death=function(self)
 			freeze_and_shake_screen(0,1)
-			spawn_entity("magic_tile",self)
+			-- entity 15: magic_tile
+			spawn_entity(15,self)
 			spawn_particle_burst(self,0,4,16,4)
 		end
 	},
-	magic_tile={
+	-- entity 15: magic_tile
+	{
 		-- draw
 		function(self)
 			pal(7,rainbow_color)
@@ -597,7 +638,8 @@ local entity_classes={
 		on_hurt=function(self)
 			-- sfx(2,1)
 			score+=score_mult
-			spawn_entity("points",self.x,self.y-7,{points=score_mult})
+			-- entity 29: points
+			spawn_entity(29,self.x,self.y-7,{points=score_mult})
 			freeze_and_shake_screen(2,2)
 			self.hurtbox_channel,self.frames_to_death,score_mult=0,6,min(score_mult+1,8)
 			local health_change=ternary(boss_phase==0,12,7)
@@ -623,7 +665,8 @@ local entity_classes={
 							-- intro stuff
 							if boss_phase==0 then
 								if health==25 then
-									boss=spawn_entity("magic_mirror")
+									-- entity 22: magic_mirror
+									boss=spawn_entity(22)
 								elseif health==37 then
 									boss.visible=true
 								elseif health==60 then
@@ -649,7 +692,8 @@ local entity_classes={
 										function()
 											player_reflection:poof()
 											player_reflection=player_reflection:die() -- nil
-											spawn_entity("top_hat",40,-20):poof()
+											 -- entity 1: top_hat
+											spawn_entity(1,40,-20):poof()
 										end,
 										"die",
 										120,
@@ -657,7 +701,8 @@ local entity_classes={
 										100,
 										function()
 											is_paused=true
-											spawn_entity("victory_screen")
+											-- entity 8: victory_screen
+											spawn_entity(8)
 										end)
 								-- move to next phase
 								else
@@ -684,7 +729,8 @@ local entity_classes={
 			end
 		end
 	},
-	player_reflection={
+	-- entity 16: player_reflection
+	{
 		-- draw
 		nil,
 		-- update
@@ -698,7 +744,7 @@ local entity_classes={
 			end
 			return true
 		end,
-		extends="player",
+		extends=11, -- entity 11: player
 		primary_color=11,
 		secondary_color=3,
 		tertiary_color=3,
@@ -709,14 +755,16 @@ local entity_classes={
 		on_hurt=function(self,entity)
 			player:get_hurt(entity)
 			self:copy_player()
-			spawn_entity("pain",self)
+			-- entity 28: pain
+			spawn_entity(28,self)
 		end,
 		copy_player=function(self)
 			self.x,self.facing=80-player.x,({1,0,2,3})[player.facing+1]
 			copy_props(player,self,{"y","step_frames","stun_frames","teeter_frames","bump_frames","invincibility_frames","frames_alive"})
 		end
 	},
-	playing_card={
+	-- entity 17: playing_card
+	{
 		-- draw
 		function(self)
 			-- spin counter-clockwise when moving left
@@ -737,7 +785,8 @@ local entity_classes={
 		hitbox_channel=1, -- player
 		is_boss_generated=true
 	},
-	flower_patch={
+	-- entity 18: flower_patch
+	{
 		-- draw
 		function(self)
 			self:draw_sprite(4,4,ternary(self.hit_frames>0,119,ternary(self.frames_to_death>0,110,101)),71,9,8)
@@ -755,7 +804,8 @@ local entity_classes={
 			self.frames_to_death,self.hit_frames,self.hitbox_channel=15,4,1
 			local i
 			for i=1,2 do
-				spawn_entity("particle",self.x,self.y-2,{
+				-- entity 21: particle
+				spawn_entity(21,self.x,self.y-2,{
 					vx=i-1.5,
 					vy=-1-rnd(),
 					friction=0.9,
@@ -766,7 +816,8 @@ local entity_classes={
 			end
 		end
 	},
-	coin={
+	-- entity 19: coin
+	{
 		-- draw
 		function(self,x,y,f)
 			circfill(self.target_x,self.target_y-1,min(flr(f/7),4),2)
@@ -787,7 +838,8 @@ local entity_classes={
 			spawn_particle_burst(self,0,6,6,4)
 		end
 	},
-	coin_slam={
+	-- entity 20: coin_slam
+	{
 		-- draw
 		function(self)
 			pset(self.x,self.y,8)
@@ -804,7 +856,8 @@ local entity_classes={
 		render_layer=4,
 		hitbox_channel=1 -- player
 	},
-	particle={
+	-- entity 21: particle
+	{
 		-- draw
 		function(self,x,y)
 			line(x,y,self.prev_x,self.prev_y,ternary(self.color==16,rainbow_color,self.color))
@@ -825,7 +878,8 @@ local entity_classes={
 			self:apply_velocity()
 		end
 	},
-	magic_mirror={
+	-- entity 22: magic_mirror
+	{
 		-- draw
 		function(self,x,y,f)
 			local expression=self.expression
@@ -873,7 +927,8 @@ local entity_classes={
 			-- create particles when charging laser
 			if self.laser_charge_frames>0 then
 				local angle,n=rnd(),ternary(hard_mode,8,18)
-				spawn_entity("particle",x+n*self.vx+22*cos(angle),y+22*sin(angle),{
+				-- entity 21: particle
+				spawn_entity(21,x+n*self.vx+22*cos(angle),y+22*sin(angle),{
 					color=14,
 					frames_to_death=n
 				}):move(x+n*self.vx,y,n+2,ease_out)
@@ -893,9 +948,11 @@ local entity_classes={
 		-- visible=false,
 		init=function(self)
 			local props,y={mirror=self,is_reflection=self.is_reflection,dark_color=self.dark_color,light_color=self.light_color},self.y+5
-			self.left_hand=spawn_entity("magic_mirror_hand",self.x-18,y,props)
+			-- entity 24: magic_mirror_hand
+			self.left_hand=spawn_entity(24,self.x-18,y,props)
 			self.coins,self.flowers,props.is_right_hand,props.dir={},{},true,1
-			self.right_hand=spawn_entity("magic_mirror_hand",self.x+18,y,props)
+			-- entity 24: magic_mirror_hand
+			self.right_hand=spawn_entity(24,self.x+18,y,props)
 		end,
 		on_death=function(self)
 			self.left_hand:die()
@@ -1076,9 +1133,11 @@ local entity_classes={
 				if boss_phase==0 then
 					self.is_wearing_top_hat=true
 				elseif boss_phase==2 then
-					player_reflection=spawn_entity("player_reflection")
+					-- entity 16: player_reflection
+					player_reflection=spawn_entity(16)
 				elseif boss_phase==3 and not hard_mode then
-					boss_reflection=spawn_entity("magic_mirror_reflection")
+					-- entity 23: magic_mirror_reflection
+					boss_reflection=spawn_entity(23)
 					self.home_x+=20
 				end
 			elseif boss_phase==0 then
@@ -1141,7 +1200,8 @@ local entity_classes={
 						function()
 							local i
 							for i=1,5 do
-								spawn_entity("magic_mirror_reflection"):promise_sequence(
+								-- entity 23: magic_mirror_reflection
+								spawn_entity(23):promise_sequence(
 									{"move",0,0,40,ease_in_out,{40*cos(i/5),40*sin(i/5),40*cos((i+1)/5),40*sin((i+1)/5)},true},
 									2,
 									"die")
@@ -1215,7 +1275,8 @@ local entity_classes={
 			return self.right_hand:pound()
 		end,
 		reel=function(self,times)
-			spawn_entity("heart",10*rnd_int(3,6)-5,4)
+			-- entity 26: heart
+			spawn_entity(26,10*rnd_int(3,6)-5,4)
 			self.is_cracked=boss_phase>=3
 			return self:promise_sequence(
 				{"set_expression",8},
@@ -1241,7 +1302,8 @@ local entity_classes={
 				"set_pose",
 				function()
 					self.is_wearing_top_hat=false
-					spawn_entity("spinning_top_hat",self.x,-32,{parent=self})
+					-- entity 2: spinning_top_hat
+					spawn_entity(2,self.x,-32,{parent=self})
 				end,
 				{"move",14,5,3,ease_in,nil,true},
 				30)
@@ -1271,7 +1333,8 @@ local entity_classes={
 						locations[i],locations[j]=locations[j],locations[i]
 						promise=promise:and_then_sequence(
 							function()
-								add(self.flowers,spawn_entity("flower_patch",locations[i]))
+								-- entity 18: flower_patch
+								add(self.flowers,spawn_entity(18,locations[i]))
 							end,
 							1)
 					end
@@ -1330,10 +1393,12 @@ local entity_classes={
 			-- and finally the spell takes effect
 				function()
 					if upgraded_version then
-						boss_reflection=spawn_entity("magic_mirror_reflection")
+						-- entity 23: magic_mirror_reflection
+						boss_reflection=spawn_entity(23)
 						self.home_x+=20
 					else
-						player_reflection=spawn_entity("player_reflection")
+						-- entity 16: player_reflection
+						player_reflection=spawn_entity(16)
 					end
 				end,
 			-- cooldown
@@ -1355,7 +1420,8 @@ local entity_classes={
 					ternary(hard_mode,5,15),
 					function()
 						local target_x,target_y=10*target:col()-5,8*target:row()-4
-						local coin=spawn_entity("coin",self.x+13,self.y-6,{target_x=target_x,target_y=target_y})
+						-- entity 19: coin
+						local coin=spawn_entity(19,self.x+13,self.y-6,{target_x=target_x,target_y=target_y})
 						add(self.coins,coin)
 						coin:promise_sequence(
 							{"move",coin.target_x+2,coin.target_y,25,ease_out,{20,-30,10,-60}},
@@ -1365,16 +1431,20 @@ local entity_classes={
 								freeze_and_shake_screen(2,2)
 								if hard_mode then
 									if target_x>5 then
-										spawn_entity("coin_slam",target_x-10,target_y,{dir=0})
+										-- entity 20: coin_slam
+										spawn_entity(20,target_x-10,target_y,{dir=0})
 									end
 									if target_x<75 then
-										spawn_entity("coin_slam",target_x+10,target_y,{dir=1})
+										-- entity 20: coin_slam
+										spawn_entity(20,target_x+10,target_y,{dir=1})
 									end
 									if target_y>4 then
-										spawn_entity("coin_slam",target_x,target_y-8,{dir=2})
+										-- entity 20: coin_slam
+										spawn_entity(20,target_x,target_y-8,{dir=2})
 									end
 									if target_y<36 then
-										spawn_entity("coin_slam",target_x,target_y+8,{dir=3})
+										-- entity 20: coin_slam
+										spawn_entity(20,target_x,target_y+8,{dir=3})
 									end
 								end
 							end,
@@ -1414,7 +1484,8 @@ local entity_classes={
 							"shoot_laser",
 							function()
 								if hard_mode and boss_phase>1 and num_reflections>0 then
-									local reflection=spawn_entity("magic_mirror_reflection")
+									-- entity 23: magic_mirror_reflection
+									local reflection=spawn_entity(23)
 									reflection:promise():and_then_repeat(num_reflections,
 											10,
 											"shoot_laser")
@@ -1436,7 +1507,8 @@ local entity_classes={
 					{"set_expression",0},
 					function()
 						freeze_and_shake_screen(0,4)
-						spawn_entity("mirror_laser",self,nil,{parent=self})
+						-- entity 25: mirror_laser
+						spawn_entity(25,self,nil,{parent=self})
 					end,
 					16,
 					-- cooldown
@@ -1505,8 +1577,9 @@ local entity_classes={
 			self.expression=expression or 5
 		end,
 	},
-	magic_mirror_reflection={
-		extends="magic_mirror",
+	-- entity 23: magic_mirror_reflection
+	{
+		extends=22, -- entity 22: magic_mirror
 		render_layer=5,
 		visible=true,
 		expression=1,
@@ -1534,7 +1607,8 @@ local entity_classes={
 			return self:promise_sequence(10,"die")
 		end
 	},
-	magic_mirror_hand={
+	-- entity 24: magic_mirror_hand
+	{
 		-- draw
 		function(self)
 			if self.visible then
@@ -1598,7 +1672,8 @@ local entity_classes={
 					-- throw the card
 					{"set_pose",1},
 					function()
-						spawn_entity("playing_card",self.x-7*dir,self.y,{
+						-- entity 17: playing_card
+						spawn_entity(17,self.x-7*dir,self.y,{
 							vx=-1.5*dir,
 							is_red=rnd()<0.5
 						})
@@ -1668,7 +1743,8 @@ local entity_classes={
 			end
 		end
 	},
-	mirror_laser={
+	-- entity 25: mirror_laser
+	{
 		-- draw
 		function(self,x,y)
 			pal(14,self.parent.dark_color)
@@ -1687,7 +1763,8 @@ local entity_classes={
 			return self:col()==entity:col()
 		end
 	},
-	heart={
+	-- entity 26: heart
+	{
 		-- draw
 		function(self,x,y,f,f2)
 			if f2>30 or f2%4>1 then
@@ -1706,7 +1783,8 @@ local entity_classes={
 			self:die()
 		end
 	},
-	poof={
+	-- entity 27: poof
+	{
 		-- draw
 		function(self,x,y,f)
 			self:draw_sprite(8,8,64+16*flr(f/3),31,16,14)
@@ -1714,7 +1792,8 @@ local entity_classes={
 		frames_to_death=12,
 		render_layer=9
 	},
-	pain={
+	-- entity 28: pain
+	{
 		-- draw
 		function(self)
 			self:draw_sprite(11,16,105,45,23,26)
@@ -1722,7 +1801,8 @@ local entity_classes={
 		render_layer=12,
 		frames_to_death=3
 	},
-	points={
+	-- entity 29: points
+	{
 		-- draw
 		function(self,x,y)
 			pset(x,y,8)
@@ -1737,7 +1817,9 @@ local entity_classes={
 -- primary pico-8 functions (_init, _update, _draw)
 function _init()
 	-- create starting entities
-	title_screen,curtains=spawn_entity("title_screen"),spawn_entity("curtains")
+	-- entity 4: curtains
+	-- entity 6: title_screen
+	title_screen,curtains=spawn_entity(6),spawn_entity(4)
 	-- immediately add new entities to the game
 	entities={title_screen,curtains}
 	-- skip title screen maybe
@@ -1890,7 +1972,8 @@ function spawn_particle_burst(source,dy,num_particles,color,speed)
 	local i
 	for i=1,num_particles do
 		local angle,particle_speed=(i+rnd(0.7))/num_particles,speed*(0.5+rnd(0.7))
-		add(particles,spawn_entity("particle",source.x,source.y-dy,{
+		-- entity 21: particle
+		add(particles,spawn_entity(21,source.x,source.y-dy,{
 			vx=particle_speed*cos(angle),
 			vy=particle_speed*sin(angle)-speed/2,
 			color=color,
@@ -1907,21 +1990,21 @@ function spawn_magic_tile(frames_to_death)
 	if boss_health.health>=60 then
 		boss_health.drain_frames=60
 	end
-	spawn_entity("magic_tile_spawn",10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{
+	-- entity 14: magic_tile_spawn
+	spawn_entity(14,10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{
 		frames_to_death=frames_to_death or 100
 	})
 end
 
 -- entity functions
-function spawn_entity(class_name,x,y,args,skip_init)
+function spawn_entity(class_id,x,y,args,skip_init)
 	if type(x)=="table" then
 		x,y=x.x,x.y
 	end
 	local k,v,entity
-	local the_class=entity_classes[class_name]
-	local super_class_name=the_class.extends
-	if super_class_name then
-		entity=spawn_entity(super_class_name,x,y,args,true)
+	local the_class=entity_classes[class_id]
+	if the_class.extends then
+		entity=spawn_entity(the_class.extends,x,y,args,true)
 	else
 		-- create default entity
 		entity={
@@ -1990,7 +2073,8 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			-- shared methods tacked on here to save tokens
 			poof=function(self,dx,dy)
 				-- sfx(12,2)
-				spawn_entity("poof",self.x+(dx or 0),self.y+(dy or 0))
+				-- entity 27: poof
+				spawn_entity(27,self.x+(dx or 0),self.y+(dy or 0))
 				return 12
 			end,
 			-- move methods
@@ -2043,7 +2127,7 @@ function spawn_entity(class_name,x,y,args,skip_init)
 	for k,v in pairs(the_class) do
 		entity[k]=v
 	end
-	entity.update,entity.draw,entity.class_name=the_class[2] or entity.update,the_class[1] or entity.draw,class_name
+	entity.update,entity.draw=the_class[2] or entity.update,the_class[1] or entity.draw
 	-- add properties onto it from the arguments
 	for k,v in pairs(args or {}) do
 		entity[k]=v
@@ -2136,7 +2220,7 @@ function make_promise(ctx,fn,...)
 		end,
 		and_then=function(self,ctx,...)
 			local promise
-			-- if the first arg is a table, asusme that's the context
+			-- if the first arg is a table, assume that's the context
 			if type(ctx)=="table" then
 				promise=make_promise(ctx,...)
 			-- otherwise pass on this promise's context
@@ -2188,7 +2272,8 @@ function show_title_screen()
 end
 
 function spawn_reflection(dx,...)
-	local reflection,params=spawn_entity("magic_mirror_reflection"),{dx or ternary(rnd()<0.5,20,-20),0,15,ease_in,nil,true}
+	-- entity 23: magic_mirror_reflection
+	local reflection,params=spawn_entity(23),{dx or ternary(rnd()<0.5,20,-20),0,15,ease_in,nil,true}
 	reflection:move(unpack(params))
 	reflection.left_hand:move(unpack(params))
 	reflection.right_hand:move(unpack(params))
