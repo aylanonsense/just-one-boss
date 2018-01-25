@@ -59,19 +59,26 @@ todo:
 	hard mode
 	gameplay tweaks
 	playtesting
+
+expected tokens for music/sound effects: 113
+that means token limit before sounds is: 8079
+
+considering features to cut
+	thrown hat:					138
+	different laser colors:		12
 ]]
 
 -- useful noop function
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations,skip_title_screen=1,true,true
+local starting_phase,skip_phase_change_animations,skip_title_screen=4,false,true
 
 -- global scene vars
-local scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=0,0,0,0,0,1,8,0,0,1 -- ,false,false
+local next_reflection_color,scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=1,0,0,0,0,0,1,8,0,0,1 -- ,false,false
 
 -- global entity vars
-local promises,new_entities,entities,title_screen,player,player_health,player_reflection,player_figment,boss,boss_health,boss_reflection,curtains={} -- ,nil,...
+local promises,entities,title_screen,player,player_health,player_reflection,player_figment,boss,boss_health,boss_reflection,curtains={} -- ,nil,...
 
 -- global entities classes
 local entity_classes={
@@ -92,30 +99,22 @@ local entity_classes={
 		function(self)
 			-- local c,r=self:col(),self:row()
 			-- rectfill(10*c-10,8*r-8,10*c,8*r,10)
-			if self.frames_alive%4<2 then
-				pal(5,8)
-			end
+			pal(5,self.parent.dark_color)
+			pal(6,self.parent.light_color)
+			pal(8,self.parent.light_color)
 			self:draw_sprite(7,10,100,9,15,12)
 		end,
 		-- update
 		function(self)
 			if not self.movement then
-				self.x=40-33*sin(self.frames_alive/50)
-			end
-			if self.frames_alive==100 then
-				self.vy=-1
+				self.x+=2*cos(self.frames_alive/50)
 			end
 		end,
 		render_layer=9,
 		hitbox_channel=1, -- player
 		is_boss_generated=true,
-		x=40,
-		y=-32,
 		vy=1,
-		frames_to_death=200,
-		on_death=function(self)
-			boss.is_wearing_top_hat=true
-		end
+		frames_to_death=120
 	},
 	bunny={
 		-- draw
@@ -218,8 +217,9 @@ local entity_classes={
 					if skip_title_screen then
 						curtains.anim_frames,n=0,0
 					end
-					entities,new_entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},{},max(0,starting_phase-1),0,1,0 -- ,false
+					entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},max(0,starting_phase-1),0,1,0 -- ,false
 					player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity("player"),spawn_entity("player_health"),spawn_entity("boss_health") -- ,nil,...
+					hard_mode=true -- todo debug remove
 					if starting_phase>0 then
 						boss=spawn_entity("magic_mirror")
 						boss.visible,boss_health.visible=true,true
@@ -635,7 +635,7 @@ local entity_classes={
 									boss_health.health=0
 								-- kill the boss
 								elseif boss_phase==4 then
-									promises,boss_phase,boss_reflection={},5,boss_reflection:die()
+									promises,boss_phase,boss_reflection={},5
 									local i
 									for i=1,17 do
 										spawn_magic_tile(20+13*i)
@@ -672,7 +672,6 @@ local entity_classes={
 										function()
 											boss_phase+=1
 										end,
-										{"return_to_ready_position",2},
 										"decide_next_action")
 								end
 							end
@@ -908,8 +907,10 @@ local entity_classes={
 			-- reflected mirror gets a green tone
 			if self.is_reflection then
 				color_wash(self.dark_color)
+				pal(8,self.light_color)
 				pal(7,self.light_color)
 				pal(6,self.light_color)
+				pal(2,ternary(self.is_cracked,self.dark_color,self.light_color))
 			end
 		end,
 		-- highest-level commands
@@ -921,7 +922,6 @@ local entity_classes={
 					scene_frame,player_health.visible=0,true
 					boss_phase+=1
 				end,
-				{"return_to_ready_position",nil,"right"},
 				"decide_next_action")
 		end,
 		decide_next_action=function(self)
@@ -930,97 +930,126 @@ local entity_classes={
 					if boss_phase==1 then
 						if hard_mode then
 							return self:promise_sequence(
-								-- "return_to_ready_position",
-								-- "throw_cards",
 								"return_to_ready_position",
-								{"shoot_lasers",true,true},
+								"throw_cards",
+								"return_to_ready_position",
+								"shoot_lasers",
 								"return_to_ready_position",
 								"despawn_coins",
 								"throw_coins",
 								"return_to_ready_position")
 						else
 							return self:promise_sequence(
-								{"set_held_state","right"},
+								{"return_to_ready_position",nil,"right"},
 								{self.left_hand,"throw_cards"},
 								{self,"return_to_ready_position",nil,"left"},
 								10,
 								{self.right_hand,"throw_cards"},
 								{self,"return_to_ready_position",nil,"left"},
 								25,
-								{"shoot_lasers",true},
-								{"return_to_ready_position",nil,"right"})
+								"shoot_lasers")
 						end
-					elseif boss_phase==2 then
+					elseif boss_phase==2 or boss_phase==3 then
 						return self:promise_sequence(
+							"return_to_ready_position",
 							"conjure_flowers",
 							"return_to_ready_position",
 							"throw_cards",
+							function()
+								if hard_mode then
+									spawn_reflection(nil,
+										"throw_cards",
+										13,
+										"die")
+								end
+							end,
 							"return_to_ready_position",
+							ternary(hard_mode,70,0),
 							"shoot_lasers",
 							"return_to_ready_position",
 							"despawn_coins",
-							"throw_coins",
-							"return_to_ready_position")
-					elseif boss_phase==3 then
-						return self:promise_sequence(
-							"shoot_lasers",
-							"return_to_ready_position",
-							"throw_cards",
-							"return_to_ready_position",
-							"conjure_flowers",
-							"return_to_ready_position",
-							"despawn_coins",
-							"throw_coins",
-							"return_to_ready_position")
+							function()
+								if hard_mode then
+									spawn_reflection(nil,
+										10,
+										"throw_hat",
+										30,
+										"die")
+								end
+							end,
+							"throw_coins")
 					elseif boss_phase==4 then
-						return self:promise_parallel(
-								{self,"set_held_state",nil},
-								{boss_reflection,"set_held_state",nil})
-							:and_then_sequence(
-						-- conjure flowers together
-							function()
-								boss_reflection:promise_sequence(
-									"return_to_ready_position",
-									32,
-									"conjure_flowers",
-									"return_to_ready_position")
-							end,
-							"conjure_flowers",
-							25,
-							"conjure_flowers",
-							"return_to_ready_position",
-						-- throw cards together
-							function()
-								boss_reflection:promise_sequence(
-									84,
-									"throw_cards",
-									"return_to_ready_position")
-							end,
-							"throw_cards",
-							"return_to_ready_position",
-							100,
-						-- shoot lasers together
-							function()
-								boss_reflection:promise_sequence(
-									30,
-									"shoot_lasers",
-									"return_to_ready_position")
-							end,
-							"shoot_lasers",
-							"return_to_ready_position",
-							80,
-						-- throw coins together
-							function()
-								boss_reflection:promise_sequence(
-									"despawn_coins",
-									17,
-									{"throw_coins",player_reflection},
-									"return_to_ready_position")
-							end,
-							"despawn_coins",
-							"throw_coins",
-							"return_to_ready_position",
-							100)
+						if hard_mode then
+							local n=0
+							return self:promise_sequence(
+								"return_to_ready_position",
+								10)
+								:and_then_repeat(5,
+									8,
+									function()
+										spawn_reflection(40-20*n,
+											15,
+											{"throw_hat",nil,1},
+											80-8*n,
+											"reform")
+										n=(n+1)%5
+										if n==0 then
+											boss:disappear()
+										end
+									end)
+								:and_then_sequence(
+								200)
+						else
+							return self:promise_sequence(
+								function()
+									boss_reflection:set_held_state()
+								end,
+								"set_held_state",
+							-- conjure flowers together
+								function()
+									boss_reflection:promise_sequence(
+										"return_to_ready_position",
+										32,
+										"conjure_flowers",
+										"return_to_ready_position")
+								end,
+								"conjure_flowers",
+								25,
+								"conjure_flowers",
+								"return_to_ready_position",
+							-- throw cards together
+								function()
+									boss_reflection:promise_sequence(
+										84,
+										"throw_cards",
+										"return_to_ready_position")
+								end,
+								"throw_cards",
+								"return_to_ready_position",
+								100,
+							-- shoot lasers together
+								function()
+									boss_reflection:promise_sequence(
+										30,
+										"shoot_lasers",
+										"return_to_ready_position")
+								end,
+								"shoot_lasers",
+								"return_to_ready_position",
+								80,
+							-- throw coins together
+								function()
+									boss_reflection:promise_sequence(
+										"despawn_coins",
+										17,
+										{"throw_coins",player_reflection},
+										"return_to_ready_position")
+								end,
+								"despawn_coins",
+								"throw_coins",
+								"return_to_ready_position",
+								100)
+						end
 					end
 				end,
 				function()
@@ -1028,6 +1057,16 @@ local entity_classes={
 					--   calls don't result in an out of memory exception
 					self:decide_next_action()
 				end)
+		end,
+		-- appear=function(self)
+		-- 	self.visible=true
+		-- 	self.left_hand:appear()
+		-- 	self.right_hand:appear()
+		-- end,
+		disappear=function(self)
+			self.visible=false
+			self.left_hand:disappear()
+			self.right_hand:disappear()
 		end,
 		phase_change=function(self)
 			-- music(13)
@@ -1038,7 +1077,7 @@ local entity_classes={
 					self.is_wearing_top_hat=true
 				elseif boss_phase==2 then
 					player_reflection=spawn_entity("player_reflection")
-				elseif boss_phase==3 then
+				elseif boss_phase==3 and not hard_mode then
 					boss_reflection=spawn_entity("magic_mirror_reflection")
 					self.home_x+=20
 				end
@@ -1089,48 +1128,70 @@ local entity_classes={
 					{"poof",0,-10},
 					30)
 			elseif boss_phase==1 then
-				return self:promise_sequence(
-					{"return_to_ready_position",2},
-					30,
-					"set_all_idle",
-					10,
-				-- pound fists
-					"pound",
-					"pound",
-					"pound",
-				-- the bouquet appears!
-					{"set_expression",1},
-					function()
-						lh.is_holding_bouquet=true
-					end,
-					{rh,"set_pose"},
-					{"move",20,-10,15,ease_in,{-20,-10,-5,0},true},
-					35,
-				-- sniff the flowers
-					{lh,"move",2,-9,20,ease_in,nil,true},
-					{self,"set_expression",3},
-					30,
-					{"set_expression",1},
-					15,
-				-- they vanish
-					function()
-						lh:promise_sequence(
-							10,
-							"set_pose",
-							function()
-								lh.is_holding_bouquet=false
-							end,
-							{"move",-22,6,20,ease_in,nil,true})
-					end,
-					{rh,"move",0,7,20,ease_out_in,{-35,-20,-25,0},true},
-					15)
+				if hard_mode then
+					return self:promise_sequence(
+						{"return_to_ready_position",2},
+						30,
+						"set_all_idle",
+						10,
+					-- pound fists
+						"pound",
+						"pound",
+						"pound",
+						function()
+							local i
+							for i=1,5 do
+								spawn_entity("magic_mirror_reflection"):promise_sequence(
+									{"move",0,0,40,ease_in_out,{40*cos(i/5),40*sin(i/5),40*cos((i+1)/5),40*sin((i+1)/5)},true},
+									2,
+									"die")
+							end
+						end,
+						75)
+				else
+					return self:promise_sequence(
+						{"return_to_ready_position",2},
+						30,
+						"set_all_idle",
+						10,
+					-- pound fists
+						"pound",
+						"pound",
+						"pound",
+					-- the bouquet appears!
+						{"set_expression",1},
+						function()
+							lh.is_holding_bouquet=true
+						end,
+						{rh,"set_pose"},
+						{"move",20,-10,15,ease_in,{-20,-10,-5,0},true},
+						35,
+					-- sniff the flowers
+						{lh,"move",2,-9,20,ease_in,nil,true},
+						{self,"set_expression",3},
+						30,
+						{"set_expression",1},
+						15,
+					-- they vanish
+						function()
+							lh:promise_sequence(
+								10,
+								"set_pose",
+								function()
+									lh.is_holding_bouquet=false
+								end,
+								{"move",-22,6,20,ease_in,nil,true})
+						end,
+						{rh,"move",0,7,20,ease_out_in,{-35,-20,-25,0},true},
+						15)
+				end
 			elseif boss_phase==2 then
 				return self:promise_sequence(
 					{"return_to_ready_position",2},
 					"cast_reflection",
 					"return_to_ready_position",
 					60)
-			elseif boss_phase==3 then
+			elseif boss_phase==3 and not hard_mode then
 				return self:promise_sequence(
 					{"return_to_ready_position",2},
 					{"cast_reflection",true},
@@ -1147,7 +1208,6 @@ local entity_classes={
 			self:cancel_move()
 			self.laser_charge_frames,self.laser_preview_frames=0,0
 			despawn_boss_entities(entities)
-			despawn_boss_entities(new_entities)
 		end,
 		-- medium-level commands
 		pound=function(self)
@@ -1174,15 +1234,16 @@ local entity_classes={
 		throw_hat=function(self)
 			return self:promise_sequence(
 				"set_all_idle",
+				{self.left_hand,"disappear"},
 				{self.right_hand,"move",self.x+5,self.y-6,15,linear},
 				{"set_pose",1},
 				30,
 				"set_pose",
 				function()
 					self.is_wearing_top_hat=false
-					spawn_entity("spinning_top_hat")
+					spawn_entity("spinning_top_hat",self.x,-32,{parent=self})
 				end,
-				{"move",25,5,4,ease_in,nil,true},
+				{"move",14,5,3,ease_in,nil,true},
 				30)
 		end,
 		conjure_flowers=function(self)
@@ -1193,12 +1254,13 @@ local entity_classes={
 				i+=rnd_int(1,3)
 			end
 			-- concentrate
-			return self:promise("set_all_idle")
-				:and_then_parallel(
-					{self.left_hand,"move_to_temple"},
-					{self.right_hand,"move_to_temple"})
-				:and_then_sequence(
-				{"set_expression",2},
+			return self:promise_sequence(
+				"set_all_idle",
+				function()
+					self.left_hand:move_to_temple()
+				end,
+				{self.right_hand,"move_to_temple"},
+				{self,"set_expression",2},
 			-- spawn the flowers
 				function()
 					self.flowers={}
@@ -1214,7 +1276,7 @@ local entity_classes={
 							1)
 					end
 				end,
-				56,
+				ternary(hard_mode,50,65),
 			-- bloom the flowers
 				function()
 					local flower
@@ -1278,16 +1340,16 @@ local entity_classes={
 				55)
 		end,
 		throw_cards=function(self,hand)
-			return self:promise_parallel(
-				{self.left_hand,"throw_cards"},
-				{self.right_hand,"throw_cards"})
+			self.left_hand:throw_cards()
+			return self.right_hand:throw_cards()
 		end,
-		throw_coins=function(self,target)
+		throw_coins=function(self,target,num_coins)
 			target=target or player
+			self.left_hand:disappear()
 			return self:promise_sequence(
 				"set_all_idle",
 				{self.right_hand,"move_to_temple"})
-				:and_then_repeat(4,
+				:and_then_repeat((num_coins or 4),
 					{self.right_hand,"set_pose",1},
 					{self,"set_expression",7},
 					ternary(hard_mode,5,15),
@@ -1325,23 +1387,22 @@ local entity_classes={
 					{self,"set_expression",3},
 					ternary(boss_phase>=4,21,20))
 		end,
-		shoot_lasers=function(self,stationary,add_reflections)
-			self.left_hand.visible=false
-			self.left_hand:poof()
-			local col,num_reflections,reflection_color=rnd_int(0,7),2,rnd_int(3,5)
+		shoot_lasers=function(self)
+			self.left_hand:disappear()
+			local col,num_reflections=rnd_int(0,7),2
 			return self:promise_sequence(
 				{"set_held_state","right"},
 				"set_expression",
 				"set_all_idle"):and_then_repeat(3,
 					function()
-						col=(col+rnd_int(2,ternary(add_reflections,3,6)))%8
+						col=(col+rnd_int(2,ternary(hard_mode and boss_phase>1,3,6)))%8
 						return self:promise_sequence(
 							-- move to a random column
 							{"move",10*col+5,-20,ternary(hard_mode,10,15),ease_in,{0,-10,0,-10}},
 							1,
 							-- charge a laser
 							function()
-								if not stationary then
+								if boss_phase>1 and not hard_mode then
 									local dir=2
 									if col>5 or (rnd()<0.5 and col>1) then
 										dir=-2
@@ -1352,8 +1413,8 @@ local entity_classes={
 							end,
 							"shoot_laser",
 							function()
-								if add_reflections and num_reflections>0 then
-									local reflection=spawn_entity("magic_mirror_reflection",nil,nil,{color_index=reflection_color-num_reflections})
+								if hard_mode and boss_phase>1 and num_reflections>0 then
+									local reflection=spawn_entity("magic_mirror_reflection")
 									reflection:promise():and_then_repeat(num_reflections,
 											10,
 											"shoot_laser")
@@ -1375,7 +1436,7 @@ local entity_classes={
 					{"set_expression",0},
 					function()
 						freeze_and_shake_screen(0,4)
-						spawn_entity("mirror_laser",self,nil,{parent=self,dark_color=self.dark_color,light_color=self.light_color})
+						spawn_entity("mirror_laser",self,nil,{parent=self})
 					end,
 					16,
 					-- cooldown
@@ -1399,33 +1460,35 @@ local entity_classes={
 					if abs(home_x-self.x)>12 or abs(home_y-self.y)>12 then
 						return self:set_held_state(held_hand or "either")
 					end
-				end)
+				end,
 			-- move to home location
-				:and_then_parallel(
-					{self,"move",home_x,home_y,15,ease_in},
-					{lh,"move",home_x-18,home_y+5,15,ease_in,{-10,-10,-20,0}},
-					{lh,"appear"},
-					{rh,"move",home_x+18,home_y+5,15,ease_in,{10,-10,20,0}},
-					{rh,"appear"})
+				function()
+					self:move(home_x,home_y,15,ease_in)
+					lh:move(home_x-18,home_y+5,15,ease_in,{-10,-10,-20,0})
+					lh:appear()
+					rh:move(home_x+18,home_y+5,15,ease_in,{10,-10,20,0})
+					rh:appear()
+				end,
+				10,
 			-- reset state
-				:and_then(self,"set_held_state",held_hand)
+				{self,"set_held_state",held_hand})
 		end,
 		set_held_state=function(self,held_hand)
-			local promises,primary,secondary={},self.left_hand,self.right_hand
+			local primary,secondary=self.left_hand,self.right_hand
 			if held_hand=="right" or (held_hand=="either" and secondary.is_holding_mirror) then
 				primary,secondary=secondary,primary
 			end
 			if secondary.is_holding_mirror then
-				add(promises,{secondary,"release_mirror"})
+				secondary:release_mirror()
 			end
 			if primary.is_holding_mirror then
 				if not held_hand then
-					add(promises,{primary,"release_mirror"})
+					primary:release_mirror()
 				end
 			elseif held_hand then
-				add(promises,{primary,"grab_mirror_handle"})
+				primary:grab_mirror_handle()
 			end
-			return self:promise_parallel(unpack(promises))
+			return 10
 		end,
 		despawn_coins=function(self)
 			local coin
@@ -1450,15 +1513,25 @@ local entity_classes={
 		is_wearing_top_hat=true,
 		home_x=20,
 		is_reflection=true,
-		color_index=1,
+		is_boss_generated=true,
 		init=function(self)
-			self.dark_color=({3,8,13,9})[self.color_index]
-			self.light_color=({11,14,12,10})[self.color_index]
+			local color_index=1
+			if hard_mode then
+				color_index=next_reflection_color
+				next_reflection_color=next_reflection_color%5+1
+			end
+			self.dark_color,self.light_color=({3,8,2,9,12})[color_index],({11,14,13,10,7})[color_index]
 			boss.init(self)
 			local props={"pose","x","y","visible"}
 			copy_props(boss,self,{"x","y","expression"})
 			copy_props(boss.left_hand,self.left_hand,props)
 			copy_props(boss.right_hand,self.right_hand,props)
+		end,
+		reform=function(self)
+			self:move(boss.x,boss.y,10)
+			self.left_hand:move(boss.left_hand.x,boss.left_hand.y,10)
+			self.right_hand:move(boss.right_hand.x,boss.right_hand.y,10)
+			return self:promise_sequence(10,"die")
 		end
 	},
 	magic_mirror_hand={
@@ -1507,13 +1580,15 @@ local entity_classes={
 		idle_mult=0,
 		-- highest-level commands
 		throw_cards=function(self)
+			local is_first=self.is_right_hand!=self.is_reflection
 			local dir,promise=self.dir,self:promise_sequence(
-				ternary(self.is_right_hand,0,ternary(hard_mode,13,19)),
+				ternary(is_first,0,ternary(hard_mode,13,19)),
 				function()
 					self.is_idle=false
 				end)
 			local r
-			for r=ternary(self.is_right_hand,0,1),4,2 do
+			-- todo reflection should show with left hand first...
+			for r=ternary(is_first,0,1),4,2 do
 				promise=promise:and_then_sequence(
 					-- move to the correct row
 					"set_pose",
@@ -1566,6 +1641,12 @@ local entity_classes={
 				return self:poof()
 			end
 		end,
+		disappear=function(self)
+			if self.visible then
+				self.visible=false
+				self:poof()
+			end
+		end,
 		pound=function(self)
 			local m,d=self.mirror,20*self.dir
 			return self:promise_sequence(
@@ -1590,8 +1671,8 @@ local entity_classes={
 	mirror_laser={
 		-- draw
 		function(self,x,y)
-			pal(14,self.dark_color)
-			pal(15,self.light_color)
+			pal(14,self.parent.dark_color)
+			pal(15,self.parent.light_color)
 			sspr(117,30,11,1,x-4.5,y+4.5,11,100)
 		end,
 		-- update
@@ -1658,12 +1739,11 @@ function _init()
 	-- create starting entities
 	title_screen,curtains=spawn_entity("title_screen"),spawn_entity("curtains")
 	-- immediately add new entities to the game
-	entities,new_entities={title_screen,curtains},{}
+	entities={title_screen,curtains}
 	-- skip title screen maybe
 	if skip_title_screen then
 		title_screen.x,title_screen.is_activated,curtains.anim=-200,true,"open"
 		title_screen:on_activated()
-		hard_mode=true
 	end
 end
 
@@ -1680,7 +1760,7 @@ function _update()
 		end
 		-- increment a bunch of counters
 		screen_shake_frames,scene_frame=decrement_counter(screen_shake_frames),increment_counter(scene_frame)
-		local num_promises=#promises
+		local num_promises,num_entities=#promises,#entities
 		-- calculate rainbow colors
 		rainbow_color=flr(scene_frame/4)%6+8
 		if rainbow_color==13 then
@@ -1695,8 +1775,8 @@ function _update()
 		end
 		filter_out_finished(promises)
 		-- update entities
-		local entity
-		for entity in all(entities) do
+		for i=1,num_entities do
+			local entity=entities[i]
 			if not is_paused or entity.is_pause_immune then
 				-- call the entity's update function
 				if not entity:update() then
@@ -1714,8 +1794,8 @@ function _update()
 		if not is_paused then
 			local i,j
 			-- don't use all() or it may cause slowdown
-			for i=1,#entities do
-				for j=1,#entities do
+			for i=1,num_entities do
+				for j=1,num_entities do
 					local entity,entity2=entities[i],entities[j]
 					if i!=j and band(entity.hitbox_channel,entity2.hurtbox_channel)>0 and entity:is_hitting(entity2) and entity2.invincibility_frames<=0 then
 						entity2:on_hurt(entity)
@@ -1723,11 +1803,6 @@ function _update()
 				end
 			end
 		end
-		-- add new entities to the game
-		foreach(new_entities,function(entity)
-			add(entities,entity)
-		end)
-		new_entities={}
 		-- remove dead entities from the game
 		filter_out_finished(entities)
 		-- sort entities for rendering
@@ -1905,9 +1980,6 @@ function spawn_entity(class_name,x,y,args,skip_init)
 			promise_sequence=function(self,...)
 				return make_promise(self):start():and_then_sequence(...)
 			end,
-			promise_parallel=function(self,...)
-				return make_promise(self):start():and_then_parallel(...)
-			end,
 			cancel_promises=function(self)
 				foreach(promises,function(promise)
 					if promise.ctx==self then
@@ -1979,8 +2051,7 @@ function spawn_entity(class_name,x,y,args,skip_init)
 	if not skip_init then
 		-- initialize it
 		entity:init()
-		-- add it to the list of entities-to-be-added
-		add(new_entities,entity)
+		add(entities,entity)
 	end
 	-- return it
 	return entity
@@ -2103,26 +2174,6 @@ function make_promise(ctx,fn,...)
 				promise=promise:and_then_sequence(...)
 			end
 			return promise
-		end,
-		and_then_parallel=function(self,...)
-			-- could save around 34 tokens for making this method really dumb
-			local overall_promise,promises,num_finished=make_promise(self.ctx),{...},0
-			if #promises==0 then
-				overall_promise:finish()
-			else
-				local parallel_promise
-				foreach(promises,function(parallel_promise)
-					self:and_then_sequence(
-						parallel_promise,
-						function()
-							num_finished+=1
-							if num_finished==#promises then
-								overall_promise:finish()
-							end
-						end)
-				end)
-			end
-			return overall_promise
 		end
 	}
 end
@@ -2134,6 +2185,14 @@ function show_title_screen()
 		function()
 			starting_phase,title_screen.frames_alive,score_data_index,time_data_index,title_screen.is_activated,hard_mode=1,0,0,1 -- ,false,false
 		end)
+end
+
+function spawn_reflection(dx,...)
+	local reflection,params=spawn_entity("magic_mirror_reflection"),{dx or ternary(rnd()<0.5,20,-20),0,15,ease_in,nil,true}
+	reflection:move(unpack(params))
+	reflection.left_hand:move(unpack(params))
+	reflection.right_hand:move(unpack(params))
+	reflection:promise_sequence(...)
 end
 
 function format_timer(seconds)
