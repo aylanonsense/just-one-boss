@@ -63,9 +63,32 @@ todo:
 expected tokens for music/sound effects: 113
 that means token limit before sounds is: 8079
 
-58 tokens can be saved by switching from entity names to entity ids
 32 tokens can be saved by getting rid of skip_title_screen
 41 tokens can be saved by getting rid of skip_phase_change_animations
+~2 tokens can be saved by moving rainbow_frames off of boss_health
+~50 tokens can be saved by making decide_next_action use the spritesheet for data
+~19 tokens can be saved by combining despawn_coins with throw_coins
+~10 tokens can be saved by using rnd_dir() in places were it's appropriate
+~5 tokens can be saved by switching spawn_entity to have default args, e.g. {x,y,vx=vx,vy=vy}
+~8 tokens can be saved by converting more props to sprite flag data
+-----------------------
+167 tokens can be saved
+7770 estimated final token count
+
+4 tokens saved by changing small sprites to use spr()
+44 tokens saved by reducing argument usage on return_to_ready_position
+43 tokens saved by converting render_layer into sprite flag data
+24 tokens saved by converting frames_to_death into sprite flag data
+13 tokens saved by converting is_boss_generated into sprite flag data
+
+i have 31 entities
+there are 255 sprites
+
+255/31
+
+186
+trying to beat 8020
+
 
 where are tokens being used?
 	magic_mirror class				2262 tokens
@@ -81,13 +104,14 @@ where are tokens being used?
 	magic_tile class				357 tokens
 	global variable declarations	48 tokens
 
+todo: ease_in_out does not exist?
 ]]
 
 -- useful noop function
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations,skip_title_screen=1,false,true
+local starting_phase,skip_phase_change_animations,skip_title_screen=1,false,false
 
 -- global scene vars
 local next_reflection_color,scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=1,0,0,0,0,0,1,8,0,0,1 -- ,false,false
@@ -97,7 +121,7 @@ local promises,entities,title_screen,player,player_health,player_reflection,play
 
 -- global entities classes
 local entity_classes={
-	-- entity 1: top_hat
+	-- entity 1: top_hat [sprite data 0-5]
 	{
 		-- draw
 		function(self)
@@ -107,11 +131,11 @@ local entity_classes={
 		function(self)
 			if self.frames_alive%15==0 then
 				-- entity 3: bunny
-				spawn_entity(3,self,nil,{vx=ternary(rnd()<0.5,1,-1)*(1+rnd(2)),vy=-1-rnd(2)}):poof()
+				spawn_entity(3,self,nil,{vx=rnd_dir()*(1+rnd(2)),vy=-1-rnd(2)}):poof()
 			end
 		end
 	},
-	-- entity 2: spinning_top_hat
+	-- entity 2: spinning_top_hat [sprite data 6-11]
 	{
 		-- draw
 		function(self)
@@ -128,13 +152,10 @@ local entity_classes={
 				self.x+=2*cos(self.frames_alive/50)
 			end
 		end,
-		render_layer=9,
 		hitbox_channel=1, -- player
-		is_boss_generated=true,
-		vy=1,
-		frames_to_death=120
+		vy=1
 	},
-	-- entity 3: bunny
+	-- entity 3: bunny [sprite data 12-17]
 	{
 		-- draw
 		function(self)
@@ -143,10 +164,9 @@ local entity_classes={
 		-- update
 		function(self)
 			self.vy+=0.1
-		end,
-		frames_to_death=100
+		end
 	},
-	-- entity 4: curtains
+	-- entity 4: curtains [sprite data 18-23]
 	{
 		-- draw
 		function(self)
@@ -162,7 +182,6 @@ local entity_classes={
 			end
 		end,
 		is_pause_immune=true,
-		render_layer=14,
 		-- amount_closed=62,
 		anim_frames=0,
 		draw_curtain=function(self,x,dir)
@@ -177,7 +196,7 @@ local entity_classes={
 			self.anim,self.anim_frames=anim,100
 		end
 	},
-	-- entity 5: screen
+	-- entity 5: screen [sprite data 24-29]
 	{
 		-- draw
 		noop,
@@ -187,7 +206,6 @@ local entity_classes={
 		end,
 		x=63,
 		is_pause_immune=true,
-		render_layer=18,
 		check_for_activation=function(self)
 			if self.frames_alive>self.frames_until_active and not self.is_activated then
 				if btnp(1) then
@@ -202,13 +220,13 @@ local entity_classes={
 			if self.frames_alive%30<22 and self.frames_alive>self.frames_until_active and not self.is_activated then
 				text="press    to "..text
 				print_centered(text,63,99,13)
-				draw_sprite(87-2*#text,98,119,83,8,7)
+				spr(190,87-2*#text,98)
 				return true
 			end
 		end,
 		on_activated=noop
 	},
-	-- entity 6: title_screen
+	-- entity 6: title_screen [sprite data 30-35]
 	{
 		-- draw
 		function(self)
@@ -218,7 +236,8 @@ local entity_classes={
 			if self:draw_prompt("begin") and dget(0)>0 then
 				pal(13,8)
 				print_centered("or    for hard mode",63,108)
-				draw_sprite(36,107,119,83,8,7,true)
+				-- spr(190,36,107,true)
+				spr(190,36,107,1,1,true)
 			end
 		end,
 		-- update
@@ -244,7 +263,7 @@ local entity_classes={
 					-- entity 12: player_health
 					-- entity 13: boss_health
 					player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity(11),spawn_entity(12),spawn_entity(13) -- ,nil,...
-					hard_mode=true -- todo debug remove
+					-- hard_mode=true -- todo debug remove
 					if starting_phase>0 then
 						-- entity 22: magic_mirror
 						boss=spawn_entity(22)
@@ -264,15 +283,14 @@ local entity_classes={
 				end)
 		end
 	},
-	-- entity 7: credit_screen
+	-- entity 7: credit_screen [sprite data 36-41]
 	{
 		-- draw
 		function(self,x)
 			print_centered("thank you for playing!",x,28,rainbow_color)
-			print_centered("created with love",x,66,6)
-			print_centered("by bridgs",x,73)
+			print_centered("created (with love) by bridgs",x,73,6)
 			print_centered("https://brid.gs",x,83,12)
-			self:draw_sprite(11,-43,ternary(hard_mode,70,48),80,22,16)
+			self:draw_sprite(11,-43,ternary_hard_mode(70,48),80,22,16)
 			self:draw_prompt("continue")
 		end,
 		extends=5, -- entity 5: screen
@@ -282,7 +300,7 @@ local entity_classes={
 			show_title_screen()
 		end
 	},
-	-- entity 8: victory_screen
+	-- entity 8: victory_screen [sprite data 42-47]
 	{
 		-- draw
 		function(self,x,y,f)
@@ -295,10 +313,10 @@ local entity_classes={
 			if f>35 then
 				print_centered("you did it!",x,41,15)
 			end
-			if f>70 then
-				print_centered("you beautiful",x,49)
-				print_centered("person, you!",x,57)
-			end
+			-- if f>70 then
+			-- 	print_centered("you beautiful",x,49)
+			-- 	print_centered("person, you!",x,57)
+			-- end
 			-- print score
 			if self.show_score then
 				self:draw_score(x,73,"score:",score.."00",format_timer(timer_seconds))
@@ -347,10 +365,11 @@ local entity_classes={
 			print(label_text,x-42.5,y,7)
 			print(score_text,x+9.5-4*#score_text,y)
 			print(time_text,x+45.5-4*#time_text,y)
-			draw_sprite(x+18,y,95,16,5,5)
+			-- draw_sprite(x+18,y,95,16,5,5)
+			spr(105,x+18,y)
 		end
 	},
-	-- entity 9: death_screen
+	-- entity 9: death_screen [sprite data 48-53]
 	{
 		-- draw
 		function(self)
@@ -364,16 +383,15 @@ local entity_classes={
 			show_title_screen()
 		end
 	},
-	-- entity 10: player_figment
+	-- entity 10: player_figment [sprite data 54-59]
 	{
 		-- draw
 		function(self)
 			self:draw_sprite(5,6,88,ternary(self.frames_alive<120,8,0),11,8)
 		end,
-		is_pause_immune=true,
-		render_layer=17
+		is_pause_immune=true
 	},
-	-- entity 11: player
+	-- entity 11: player [sprite data 60-65]
 	{
 		-- draw
 		function(self)
@@ -461,7 +479,6 @@ local entity_classes={
 		teeter_frames=0,
 		bump_frames=0,
 		stun_frames=0,
-		render_layer=10,
 		primary_color=12,
 		secondary_color=13,
 		tertiary_color=0,
@@ -538,7 +555,7 @@ local entity_classes={
 			end
 		end
 	},
-	-- entity 12: player_health
+	-- entity 12: player_health [sprite data 66-71]
 	{
 		-- draw
 		function(self)
@@ -570,15 +587,14 @@ local entity_classes={
 		y=122,
 		hearts=4,
 		-- anim=nil,
-		anim_frames=0,
-		render_layer=13
+		anim_frames=0
 	},
-	-- entity 13: boss_health
+	-- entity 13: boss_health [sprite data 72-77]
 	{
 		-- draw
 		function(self)
 			if self.visible then
-				rect(33,2,93,8,ternary(self.rainbow_frames>0,rainbow_color,ternary(hard_mode,8,5)))
+				rect(33,2,93,8,ternary(self.rainbow_frames>0,rainbow_color,ternary_hard_mode(8,5)))
 				rectfill(33,2,mid(33,32+self.health,92),8)
 			end
 		end,
@@ -595,10 +611,9 @@ local entity_classes={
 		-- visible=false,
 		health=0,
 		rainbow_frames=0,
-		render_layer=13,
 		drain_frames=0
 	},
-	-- entity 14: magic_tile_spawn
+	-- entity 14: magic_tile_spawn [sprite data 78-83]
 	{
 		-- draw
 		function(self,x,y,f,f2)
@@ -610,7 +625,6 @@ local entity_classes={
 				rect(x-f2-1,y-f2,x+f2+1,y+f2,ternary(f<4,5,6))
 			end
 		end,
-		frames_to_death=10,
 		on_death=function(self)
 			freeze_and_shake_screen(0,1)
 			-- entity 15: magic_tile
@@ -618,7 +632,7 @@ local entity_classes={
 			spawn_particle_burst(self,0,4,16,4)
 		end
 	},
-	-- entity 15: magic_tile
+	-- entity 15: magic_tile [sprite data 84-89]
 	{
 		-- draw
 		function(self)
@@ -632,9 +646,7 @@ local entity_classes={
 				spawn_magic_tile(10)
 			end
 		end,
-		render_layer=3,
 		hurtbox_channel=2, -- pickup
-		is_boss_generated=true,
 		on_hurt=function(self)
 			-- sfx(2,1)
 			score+=score_mult
@@ -729,7 +741,7 @@ local entity_classes={
 			end
 		end
 	},
-	-- entity 16: player_reflection
+	-- entity 16: player_reflection [sprite data 90-95]
 	{
 		-- draw
 		nil,
@@ -763,7 +775,7 @@ local entity_classes={
 			copy_props(player,self,{"y","step_frames","stun_frames","teeter_frames","bump_frames","invincibility_frames","frames_alive"})
 		end
 	},
-	-- entity 17: playing_card
+	-- entity 17: playing_card [sprite data 96-101]
 	{
 		-- draw
 		function(self)
@@ -781,11 +793,9 @@ local entity_classes={
 			self:draw_sprite(5,7,10*sprite+77,21,10,10)
 		end,
 		-- vx,is_red
-		frames_to_death=100,
-		hitbox_channel=1, -- player
-		is_boss_generated=true
+		hitbox_channel=1 -- player
 	},
-	-- entity 18: flower_patch
+	-- entity 18: flower_patch [sprite data 102-107]
 	{
 		-- draw
 		function(self)
@@ -797,8 +807,6 @@ local entity_classes={
 				self.hitbox_channel=0
 			end
 		end,
-		render_layer=4,
-		is_boss_generated=true,
 		hit_frames=0,
 		bloom=function(self)
 			self.frames_to_death,self.hit_frames,self.hitbox_channel=15,4,1
@@ -816,18 +824,13 @@ local entity_classes={
 			end
 		end
 	},
-	-- entity 19: coin
+	-- entity 19: coin [sprite data 108-113]
 	{
 		-- draw
 		function(self,x,y,f)
 			circfill(self.target_x,self.target_y-1,min(flr(f/7),4),2)
-			local sprite=ternary(f>10,2,0)+flr(f/3)%2
-			if f>=26 then
-				sprite=ternary(self.health<3,5,4)
-			end
-			self:draw_sprite(4,5,9*sprite,37,9,9)
+			self:draw_sprite(4,5,9*ternary(f>=26,ternary(self.health<3,5,4),ternary(f>10,2,0)+flr(f/3)%2),37,9,9)
 		end,
-		is_boss_generated=true,
 		health=3,
 		get_bumped=function(self)
 			if decrement_counter_prop(self,"health") then
@@ -838,11 +841,10 @@ local entity_classes={
 			spawn_particle_burst(self,0,6,6,4)
 		end
 	},
-	-- entity 20: coin_slam
+	-- entity 20: coin_slam [sprite data 114-119]
 	{
 		-- draw
 		function(self)
-			pset(self.x,self.y,8)
 			-- 0 = left, 1 = right, 2 = up, 3 = down
 			self:draw_sprite(5,3,ternary(self.dir>1,47,58),71,11,7,self.dir==0,self.dir==2)
 		end,
@@ -852,11 +854,9 @@ local entity_classes={
 				self.hitbox_channel=0
 			end
 		end,
-		frames_to_death=7,
-		render_layer=4,
 		hitbox_channel=1 -- player
 	},
-	-- entity 21: particle
+	-- entity 21: particle [sprite data 120-125]
 	{
 		-- draw
 		function(self,x,y)
@@ -869,7 +869,6 @@ local entity_classes={
 			self.vy*=self.friction
 			self.prev_x,self.prev_y=self.x,self.y
 		end,
-		render_layer=11,
 		friction=1,
 		gravity=0,
 		-- color=7,
@@ -878,7 +877,7 @@ local entity_classes={
 			self:apply_velocity()
 		end
 	},
-	-- entity 22: magic_mirror
+	-- entity 22: magic_mirror [sprite data 126-131]
 	{
 		-- draw
 		function(self,x,y,f)
@@ -926,7 +925,7 @@ local entity_classes={
 			end
 			-- create particles when charging laser
 			if self.laser_charge_frames>0 then
-				local angle,n=rnd(),ternary(hard_mode,8,18)
+				local angle,n=rnd(),ternary_hard_mode(8,18)
 				-- entity 21: particle
 				spawn_entity(21,x+n*self.vx+22*cos(angle),y+22*sin(angle),{
 					color=14,
@@ -934,7 +933,6 @@ local entity_classes={
 				}):move(x+n*self.vx,y,n+2,ease_out)
 			end
 		end,
-		render_layer=7,
 		x=40,
 		y=-28,
 		home_x=40,
@@ -947,7 +945,7 @@ local entity_classes={
 		idle_mult=0,
 		-- visible=false,
 		init=function(self)
-			local props,y={mirror=self,is_reflection=self.is_reflection,dark_color=self.dark_color,light_color=self.light_color},self.y+5
+			local props,y={mirror=self,is_reflection=self.is_reflection,dark_color=self.dark_color,light_color=self.light_color,is_boss_generated=self.is_boss_generated},self.y+5
 			-- entity 24: magic_mirror_hand
 			self.left_hand=spawn_entity(24,self.x-18,y,props)
 			self.coins,self.flowers,props.is_right_hand,props.dir={},{},true,1
@@ -993,16 +991,15 @@ local entity_classes={
 								"shoot_lasers",
 								"return_to_ready_position",
 								"despawn_coins",
-								"throw_coins",
-								"return_to_ready_position")
+								"throw_coins")
 						else
 							return self:promise_sequence(
-								{"return_to_ready_position",nil,"right"},
+								"return_to_ready_position",
 								{self.left_hand,"throw_cards"},
-								{self,"return_to_ready_position",nil,"left"},
+								{self,"return_to_ready_position"},
 								10,
 								{self.right_hand,"throw_cards"},
-								{self,"return_to_ready_position",nil,"left"},
+								{self,"return_to_ready_position"},
 								25,
 								"shoot_lasers")
 						end
@@ -1021,7 +1018,7 @@ local entity_classes={
 								end
 							end,
 							"return_to_ready_position",
-							ternary(hard_mode,70,0),
+							ternary_hard_mode(70,0),
 							"shoot_lasers",
 							"return_to_ready_position",
 							"despawn_coins",
@@ -1146,11 +1143,11 @@ local entity_classes={
 					{lh,"appear"},
 					30)
 				-- shake finger
-					:and_then_repeat(3,
+					:and_then_repeat(2,
 						{"set_pose",5},
-						4,
+						6,
 						{"set_pose",4},
-						4)
+						6)
 					:and_then_sequence(
 					4,
 				-- grab handle
@@ -1256,9 +1253,9 @@ local entity_classes={
 					{"return_to_ready_position",2},
 					{"cast_reflection",true},
 					function()
-						boss_reflection:promise("return_to_ready_position",1,"right")
+						boss_reflection:return_to_ready_position()
 					end,
-					{"return_to_ready_position",1,"left"})
+					"return_to_ready_position")
 			end
 		end,
 		cancel_everything=function(self)
@@ -1339,7 +1336,7 @@ local entity_classes={
 							1)
 					end
 				end,
-				ternary(hard_mode,50,65),
+				ternary_hard_mode(50,65),
 			-- bloom the flowers
 				function()
 					local flower
@@ -1417,14 +1414,14 @@ local entity_classes={
 				:and_then_repeat((num_coins or 4),
 					{self.right_hand,"set_pose",1},
 					{self,"set_expression",7},
-					ternary(hard_mode,5,15),
+					ternary_hard_mode(5,15),
 					function()
 						local target_x,target_y=10*target:col()-5,8*target:row()-4
 						-- entity 19: coin
 						local coin=spawn_entity(19,self.x+13,self.y-6,{target_x=target_x,target_y=target_y})
 						add(self.coins,coin)
 						coin:promise_sequence(
-							{"move",coin.target_x+2,coin.target_y,25,ease_out,{20,-30,10,-60}},
+							{"move",target_x+2,target_y,25,ease_out,{20,-30,10,-60}},
 							2,
 							function()
 								coin.occupies_tile,coin.hitbox_channel=true,5 -- player, coin
@@ -1468,7 +1465,7 @@ local entity_classes={
 						col=(col+rnd_int(2,ternary(hard_mode and boss_phase>1,3,6)))%8
 						return self:promise_sequence(
 							-- move to a random column
-							{"move",10*col+5,-20,ternary(hard_mode,10,15),ease_in,{0,-10,0,-10}},
+							{"move",10*col+5,-20,ternary_hard_mode(10,15),ease_in,{0,-10,0,-10}},
 							1,
 							-- charge a laser
 							function()
@@ -1501,7 +1498,7 @@ local entity_classes={
 					function()
 						self.laser_charge_frames=10
 					end,
-					ternary(hard_mode,9,19),
+					ternary_hard_mode(9,19),
 					"preview_laser",
 					-- shoot a laser
 					{"set_expression",0},
@@ -1519,20 +1516,20 @@ local entity_classes={
 			self.laser_preview_frames=5
 			return 5
 		end,
-		return_to_ready_position=function(self,expression,held_hand)
+		return_to_ready_position=function(self,expression)--,expression,held_hand)
 			local lh,rh,home_x,home_y=self.left_hand,self.right_hand,self.home_x,self.home_y
 			lh.is_holding_wand,rh.is_holding_wand=false,false
 			-- reset to a default expression/pose
 			return self:promise_sequence(
-				{"set_all_idle",true},
-				{"set_expression",expression or 1},
 				{lh,"set_pose"},
 				{rh,"set_pose"},
-				function()
-					if abs(home_x-self.x)>12 or abs(home_y-self.y)>12 then
-						return self:set_held_state(held_hand or "either")
-					end
-				end,
+				{self,"set_all_idle",true},
+				{"set_expression",expression or 1},--expression or 1},
+				-- function()
+				-- 	if abs(home_x-self.x)>12 or abs(home_y-self.y)>12 then
+				-- 		return self:set_held_state(held_hand or "either")
+				-- 	end
+				-- end,
 			-- move to home location
 				function()
 					self:move(home_x,home_y,15,ease_in)
@@ -1543,7 +1540,7 @@ local entity_classes={
 				end,
 				10,
 			-- reset state
-				{self,"set_held_state",held_hand})
+				"set_held_state")
 		end,
 		set_held_state=function(self,held_hand)
 			local primary,secondary=self.left_hand,self.right_hand
@@ -1577,16 +1574,16 @@ local entity_classes={
 			self.expression=expression or 5
 		end,
 	},
-	-- entity 23: magic_mirror_reflection
+	-- entity 23: magic_mirror_reflection [sprite data 132-137]
 	{
+		-- draw
+		nil,
 		extends=22, -- entity 22: magic_mirror
-		render_layer=5,
 		visible=true,
 		expression=1,
 		is_wearing_top_hat=true,
 		home_x=20,
 		is_reflection=true,
-		is_boss_generated=true,
 		init=function(self)
 			local color_index=1
 			if hard_mode then
@@ -1607,7 +1604,7 @@ local entity_classes={
 			return self:promise_sequence(10,"die")
 		end
 	},
-	-- entity 24: magic_mirror_hand
+	-- entity 24: magic_mirror_hand [sprite data 138-143]
 	{
 		-- draw
 		function(self)
@@ -1648,7 +1645,6 @@ local entity_classes={
 		end,
 		-- is_right_hand,dir
 		-- is_holding_bouquet=false,
-		-- render_layer=8,
 		pose=3,
 		dir=-1,
 		idle_mult=0,
@@ -1656,7 +1652,7 @@ local entity_classes={
 		throw_cards=function(self)
 			local is_first=self.is_right_hand!=self.is_reflection
 			local dir,promise=self.dir,self:promise_sequence(
-				ternary(is_first,0,ternary(hard_mode,13,19)),
+				ternary(is_first,0,ternary_hard_mode(13,19)),
 				function()
 					self.is_idle=false
 				end)
@@ -1668,7 +1664,7 @@ local entity_classes={
 					"set_pose",
 					{"move",40+52*dir,8*(r%5)+4,18,ease_out_in,{10*dir,-10,10*dir,10}},
 					{"set_pose",2},
-					ternary(hard_mode,0,12),
+					ternary_hard_mode(0,12),
 					-- throw the card
 					{"set_pose",1},
 					function()
@@ -1743,7 +1739,7 @@ local entity_classes={
 			end
 		end
 	},
-	-- entity 25: mirror_laser
+	-- entity 25: mirror_laser [sprite data 144-149]
 	{
 		-- draw
 		function(self,x,y)
@@ -1756,14 +1752,11 @@ local entity_classes={
 			self.x=self.parent.x
 		end,
 		hitbox_channel=1, -- player
-		is_boss_generated=true,
-		render_layer=10,
-		frames_to_death=16,
 		is_hitting=function(self,entity)
 			return self:col()==entity:col()
 		end
 	},
-	-- entity 26: heart
+	-- entity 26: heart [sprite data 150-155]
 	{
 		-- draw
 		function(self,x,y,f,f2)
@@ -1771,7 +1764,6 @@ local entity_classes={
 				self:draw_sprite(4,5+max(0,f-0.07*f*f),ternary(f2%30<20,36,45),30,9,7)
 			end
 		end,
-		frames_to_death=150,
 		hurtbox_channel=2, -- pickup
 		on_hurt=function(self)
 			-- gain heart
@@ -1783,34 +1775,27 @@ local entity_classes={
 			self:die()
 		end
 	},
-	-- entity 27: poof
+	-- entity 27: poof [sprite data 156-161]
 	{
 		-- draw
 		function(self,x,y,f)
 			self:draw_sprite(8,8,64+16*flr(f/3),31,16,14)
-		end,
-		frames_to_death=12,
-		render_layer=9
+		end
 	},
-	-- entity 28: pain
+	-- entity 28: pain [sprite data 162-167]
 	{
 		-- draw
 		function(self)
 			self:draw_sprite(11,16,105,45,23,26)
-		end,
-		render_layer=12,
-		frames_to_death=3
+		end
 	},
-	-- entity 29: points
+	-- entity 29: points [sprite data 168-173]
 	{
 		-- draw
 		function(self,x,y)
-			pset(x,y,8)
-			print_centered("+"..self.points.."00",x,y,rainbow_color)
+			print_centered(self.points.."00",x,y,rainbow_color)
 		end,
-		render_layer=10,
-		vy=-0.5,
-		frames_to_death=30
+		vy=-0.5
 	}
 }
 
@@ -1932,7 +1917,7 @@ function _draw()
 	camera(shake_x)
 	if boss_phase>0 then
 		-- draw score multiplier
-		draw_sprite(6,2,72,45,11,7)
+		draw_sprite(6,2,77,10,11,7)
 		print(score_mult,8,3,0)
 		-- draw score
 		print(score_text,121-4*#score_text,3,1)
@@ -2002,7 +1987,7 @@ function spawn_entity(class_id,x,y,args,skip_init)
 		x,y=x.x,x.y
 	end
 	local k,v,entity
-	local the_class=entity_classes[class_id]
+	local the_class,sid=entity_classes[class_id],6*class_id-6
 	if the_class.extends then
 		entity=spawn_entity(the_class.extends,x,y,args,true)
 	else
@@ -2011,9 +1996,9 @@ function spawn_entity(class_id,x,y,args,skip_init)
 			-- lifetime props
 			-- finished=false,
 			frames_alive=0,
-			frames_to_death=0,
+			-- frames_to_death=0,
 			-- ordering props
-			render_layer=5,
+			-- render_layer=5,
 			-- hit props
 			hitbox_channel=0,
 			hurtbox_channel=0,
@@ -2123,11 +2108,13 @@ function spawn_entity(class_id,x,y,args,skip_init)
 			end
 		}
 	end
+	-- load some properties from the sprite sheet flag data
+	entity.render_layer,entity.frames_to_death,entity.is_boss_generated=fget(sid),fget(sid+1),fget(sid+2,0)
 	-- add class properties/methods onto it
 	for k,v in pairs(the_class) do
 		entity[k]=v
 	end
-	entity.update,entity.draw=the_class[2] or entity.update,the_class[1] or entity.draw
+	entity.draw,entity.update=the_class[1] or entity.draw,the_class[2] or entity.update
 	-- add properties onto it from the arguments
 	for k,v in pairs(args or {}) do
 		entity[k]=v
@@ -2151,8 +2138,8 @@ end
 
 function slide(entity,dir)
 	dir=dir or 1
-	entity.x+=dir*2
-	entity:move(-dir*127,0,100,ease_in_out,{dir*70,0,0,0},true)
+	-- entity.x+=dir*2
+	entity:move(-dir*129,0,100,ease_in_out,{dir*70,0,0,0},true)
 	return entity
 end
 
@@ -2273,7 +2260,7 @@ end
 
 function spawn_reflection(dx,...)
 	-- entity 23: magic_mirror_reflection
-	local reflection,params=spawn_entity(23),{dx or ternary(rnd()<0.5,20,-20),0,15,ease_in,nil,true}
+	local reflection,params=spawn_entity(23),{dx or 20*rnd_dir(),0,15,ease_in,nil,true}
 	reflection:move(unpack(params))
 	reflection.left_hand:move(unpack(params))
 	reflection.right_hand:move(unpack(params))
@@ -2290,7 +2277,7 @@ function print_centered(text,x,...)
 end
 
 function is_rendered_on_top_of(a,b)
-	return ternary(a.render_layer==b.render_layer,a:row()>b:row(),a.render_layer>b.render_layer)
+	return ternary(a.render_layer==b.render_layer,a.y>b.y,a.render_layer>b.render_layer)
 end
 
 function draw_sprite(x,y,sx,sy,sw,sh,...)
@@ -2328,7 +2315,7 @@ function ease_out(percent)
 end
 
 function ease_out_in(percent)
-	return ternary(percent<0.5,ease_out(2*percent)/2,0.5+ease_in(2*percent-1)/2)
+	return ternary(percent<0.5,ease_out(2*percent),1+ease_in(2*percent-1))/2
 end
 
 -- helper functions
@@ -2339,6 +2326,10 @@ end
 -- if condition is true return the second argument, otherwise the third
 function ternary(condition,if_true,if_false)
 	return condition and if_true or if_false
+end
+
+function ternary_hard_mode(...)
+	return ternary(hard_mode,...)
 end
 
 -- unpacks an array so it can be passed as function arguments
@@ -2352,6 +2343,10 @@ end
 -- generates a random integer between min_val and max_val, inclusive
 function rnd_int(min_val,max_val)
 	return flr(min_val+rnd(1+max_val-min_val))
+end
+
+function rnd_dir()
+	return 2*rnd_int(0,1)-1
 end
 
 -- increment a counter, wrapping to 20000 if it risks overflowing
@@ -2380,7 +2375,7 @@ function filter_out_finished(list)
 			list[k]=nil
 			num_deleted+=1
 		else
-			list[k-num_deleted],list[k]=v,nil
+			list[k-num_deleted],list[k]=v -- ,nil
 		end
 	end
 end
@@ -2397,17 +2392,17 @@ __gfx__
 00000d000d00d00000000000000000d00000000000d000000d0009800000d000000000d000d000dcccccc000dcccccccccd222555555555555509777777777f0
 000ccccc00000000c00000000ccccc000000ccccc000000ccccc000000000000000000000000000ddddddd00000ccccc000222055555555555009777777777f0
 00ccccccc000000ccc0000000ccccc00000ccccccc0090ccccccc090000000000000000000000000d000d00000ccccccc002005555555555600977777777777f
-00ccccccc000000ccc000000ccccccc0000ccccccc000dcccccccd00d0000000d00d0000000d0222222222220dc11c11cd02155511111115561977777777777f
-00dcccccd000000ccc000000ccccccc0000dcccccd0080cdddddc080dcccccccd00cdcccccdc02222222222200dcccccd0025511111111111659777777777779
-00ccccccc00000ccccc00000dcccccd0000ccccccc0000ddddddd000dcccccccd00ccccccccc02222222222200ccccccc0025551111111115559777777777779
-00cdddddc00000dcccd00000dcdddcd0000cdddddc0000ddddddd000cdddddddc00ddddddddd02222222222200dcccccd0025055551115555059777777777779
-00ddddddd00000dcccd00000ddddddd0000ddddddd00000ddddd0000ddddddddd0000ddddd0002222222222200ddddddd0020088555555588009777777777779
-000d000d000000cdddc00000ddddddd00000000d00000000d00000000ddddddd00000d000d00022222222222000d000d00020055888888855000977777777790
-0000000000000ddddddd0000000ddd00000000000000000000000000000000000000000000000222222222222222222067600055555555555000977777777790
-0000000000000ddddddd00000000d000000000000000000000000000000000000000000000000222222222222222222607060055555555555000047777777400
-00000000000000d000d000000000d0000000000000000000000000000000000000000000000002222222222222222226077600555555555550009949777949f0
-00000000000000ccccc0000000000000000000000000000000000000000000000000000000000222222222222222222600060005555555550000944999994490
-0000000000000ccccccc0000000c0000000000000000000000000000000000000000000000000222222222222222222066600000055555000000099494949900
+00ccccccc000000ccc000000ccccccc0000ccccccc000dcccccccd00d0000000d00d0000000d0011111111100dc11c11cd02155511111115561977777777777f
+00dcccccd000000ccc000000ccccccc0000dcccccd0080cdddddc080dcccccccd00cdcccccdc01111111111100dcccccd0025511111111111659777777777779
+00ccccccc00000ccccc00000dcccccd0000ccccccc0000ddddddd000dcccccccd00ccccccccc01111110101100ccccccc0025551111111115559777777777779
+00cdddddc00000dcccd00000dcdddcd0000cdddddc0000ddddddd000cdddddddc00ddddddddd01111111011100dcccccd0025055551115555059777777777779
+00ddddddd00000dcccd00000ddddddd0000ddddddd00000ddddd0000ddddddddd0000ddddd0001111110101100ddddddd0020088555555588009777777777779
+000d000d000000cdddc00000ddddddd00000000d00000000d00000000ddddddd00000d000d00011111111111000d000d00020055888888855000977777777790
+0000000000000ddddddd0000000ddd00000000000000000000000000000000000000000000000011111111102222222222220055555555555000977777777790
+0000000000000ddddddd00000000d000000000000000000000000000000000000000000000000222222222222222222222220055555555555000047777777400
+00000000000000d000d000000000d0000000000000000000000000000000000000000000000002222222222222222222222200555555555550009949777949f0
+00000000000000ccccc0000000000000000000000000000000000000000000000000000000000222222222222222222222220005555555550000944999994490
+0000000000000ccccccc0000000c0000000000000000000000000000000000000000000000000222222222222222222222220000055555000000099494949900
 0000000000000cc1c1cc000000cc0c00000000000000000000000000000000000000000000000000006000000000000000000600000000000000000094900000
 000ccccc000000c1c1c000000ccccc000000ccccc000000000000000000ccc000000000000000000077700000000000000007770000006777760000099900000
 00ccccccc00000c1c1d00000cc1c1cc0000ccccccc00000ccccc000000c1c1c00000000000000000775770006777777600077777000007577770000009000000
@@ -2432,17 +2427,17 @@ __gfx__
 000000000000dd0000000066660dddddddd0d666d666dd6d6d6d6d27177777170000777700000000777770000000077077700000000007000000000000000000
 0000000000000000000000006600dddddd00dd66666dddd66666dd27111111170000777000000000777770077000077000707077000000000000000000000000
 00000000000000000000000000000dddd0000d5ddddd00d5dddd5027777777770000000000000000077000077000000000000000000000000000000000000000
-000000000000000000000000000000000000005d5d50000555d50022222222222222222201111111110511111111155111111111500000000000000000000a00
-0000000000000000000000000000000000000077000000000000007000000770000000001111111111111555555511115555555110000000000000000000a000
-00000000000000000000000000007700000000777000000000000770000007700770000011111101011155111115511551111155100000000000000a0000a000
-00000000000000000000000000007700000000077000000000000770000007770770000011111110111151115111511511151115100000000000000a000a0000
-0000000000000000000000000770077000000007770000000000077000000077066000001111110101115115151151151155511510000000000000a000aa0000
-0000776777770000777000000777067000000000770770000000077000000076777000001111111111115111511151151115111510000a00000000aa0aa00000
-00d77777777700d77777700000677067007700776677700000777770770000077770000001111111110155111115511551111155100000a000000aaaaaa00000
-00d77dd7600000d77dd7700077066766777707777677000000777677770000076670000022222222222115555555111155555551100000aaa000000aaa0000aa
-00d77777777700d777777000777766667760077676770000007676777000000777700000222222222225111111111551111111115000000a00000000aaaaaa00
-00d77dd7777700d77dd770000066666666000067677700000066677600000007776d00002222222222222222222550000000000000000000000000000aaa0000
-00d67777700000d67777600000006666dd000006666d0000006676600000000066dd000022222222222222222225500000006600000000000000000000a00000
+000000000000000000000000000000000000005d5d50000555d50022222222222222222222222222222511111111155111111111500000000000000000000a00
+0000000000000000000000000000000000000077000000000000007000000770000000002222222222211555555511115555555110000000000000000000a000
+00000000000000000000000000007700000000777000000000000770000007700770000022222222222155111115511551111155100000000000000a0000a000
+00000000000000000000000000007700000000077000000000000770000007770770000000676000222151115111511511151115100000000000000a000a0000
+0000000000000000000000000770077000000007770000000000077000000077066000000607060022215115151151151155511510000000000000a000aa0000
+0000776777770000777000000777067000000000770770000000077000000076777000000607760022215111511151151115111510000a00000000aa0aa00000
+00d77777777700d77777700000677067007700776677700000777770770000077770000006000600222155111115511551111155100000a000000aaaaaa00000
+00d77dd7600000d77dd7700077066766777707777677000000777677770000076670000000666000222115555555111155555551100000aaa000000aaa0000aa
+00d77777777700d777777000777766667760077676770000007676777000000777700000000000002225111111111551111111115000000a00000000aaaaaa00
+00d77dd7777700d77dd770000066666666000067677700000066677600000007776d00000000000022222222222550000000000000000000000000000aaa0000
+00d67777700000d67777600000006666dd000006666d0000006676600000000066dd000000000000222222222225500000006600000000000000000000a00000
 000066660000000066660000000000ddd000000066d00000000dddd000000000ddd0000022222222222222222225550000006600000000000000000000a00000
 00006660000000066600000000666000000007770000000076600000000cbb000000006660000000066600002220550000005500000000000000000000000000
 006666666000066666660000777772700007777776000067667770000accbbee0000666666600007777727002220000000006600000000000000000000000000
@@ -2470,19 +2465,19 @@ __gfx__
 066000060600606000000060066000606000000060600005000000077770000000500000000000880880000000002222222222222222220003b1330222222225
 66660006060060600000006066660006060000006060000177000007f970000000600000000008888ee800000000222222222222222222000333000222222221
 66060006060060600000006066060000666000006060000177700077f000000000500000000008888ee800000000222222222222222222000333000222222221
-6000000606006060000000606000000006600000606000017797007ff000000000600000000000888880000000002222222222222222220003100000000d0001
-60000006660060600000006066000000066000006060000177f7707f0000000000600000000000088800000000002222222222222222220001300000000dd001
-0d000dddd0000ddd00000d00ddd00000ddd00000d0d0000177777777000000000060000000000000800000000000222222222222222222000130000ddddddd01
-00dddddd000000ddddddd0000ddddddddd00000ddddd000100777777700000000060000000000000000000000000222222222222222222000130000dddddddd1
-22222222222222222222222222222222222222222222222100777077700000000050000000000000077000000000222222222222222222222222222ddddddd01
-0000666666600000666660000006600066666666666666610077777e700000000053b0ff0777700077f0077770002222222222222222222222222220000dd001
-000666000006000006666000006666006066600000000661007777770000000000943bff777777707f7077ff70002222222222222222222222222220000d0001
-0066600000006000066666000060660060660000000006610077777770000000004930077777777f7f07f9000000222222222222222222222222222222222221
-060660000000660006606600000006006066000000006601007777ff7ff0000000990307777777777f7f00000000222222222222222222222222222222222221
-060600000000660006606660000006006066000000000661007f77f777f000000099000777777777777700000000222222222222222222222222222222222221
-060600000000060006660660000006006066000000000001007ffff7770000000099000777f77777077700000000222222222222222222222222222222222221
-6066000000000660060606660000060060660000000000010077f777770000000009000f77ff77f777e79949b030222222222222222222222222222222222221
-606600000000066006066066000006006066000000000001007797777700000000000000f777977f777999943b03222222222222222222222222222222222221
+6000000606006060000000606000000006600000606000017797007ff00000000060000000000088888000000000222222222222222222000310000222222221
+60000006660060600000006066000000066000006060000177f7707f000000000060000000000008880000000000222222222222222222000130000222222221
+0d000dddd0000ddd00000d00ddd00000ddd00000d0d0000177777777000000000060000000000000800000000000222222222222222222000130000222222221
+00dddddd000000ddddddd0000ddddddddd00000ddddd000100777777700000000060000000000000000000000000222222222222222222000130000222222221
+22222222222222222222222222222222222222222222222100777077700000000050000000000000077000000000222222222222222222222222222222222221
+0000666666600000666660000006600066666666666666610077777e700000000053b0ff0777700077f007777000222222222222222222220000d00022222221
+000666000006000006666000006666006066600000000661007777770000000000943bff777777707f7077ff7000222222222222222222220000dd0022222221
+0066600000006000066666000060660060660000000006610077777770000000004930077777777f7f07f900000022222222222222222222ddddddd022222221
+060660000000660006606600000006006066000000006601007777ff7ff0000000990307777777777f7f0000000022222222222222222222dddddddd22222221
+060600000000660006606660000006006066000000000661007f77f777f00000009900077777777777770000000022222222222222222222ddddddd022222221
+060600000000060006660660000006006066000000000001007ffff7770000000099000777f77777077700000000222222222222222222220000dd0022222221
+6066000000000660060606660000060060660000000000010077f777770000000009000f77ff77f777e79949b030222222222222222222220000d00022222221
+606600000000066006066066000006006066000000000001007797777700000000000000f777977f777999943b03222222222222222222220000000022222221
 60660000000006600600606660000600606600000000000100000000000000000000000000000000009990099999990000000000000000000000000000000001
 60660000000006600600660660000600606600000600000100000000000000000000000000099900099909009090099000000099000000000000000000000001
 60660000000006600600060666000600606666666600000100000000000000000000090000909900099000909090009900000990900999000000000000000001
@@ -2517,8 +2512,8 @@ __gfx__
 dddddddd0000000ddddd00000ddddddddd000ddddddddd0001000010000100001000010000100001000010000100001000010000100001000010000100001000
 
 __gff__
-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0500000000000978010000000564000000000e00000000001200000000001200000000001200000000001200000000001200000000001100000000000500000000000d00000000000d0000000000050a000000000300010000000500000000000564010000000400010000000500010000000407000000000b80000000000700
+000000000500010000000500000000000a1001000000059600000000090c000000000c03000000000a200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __map__
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
