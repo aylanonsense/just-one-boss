@@ -75,19 +75,8 @@ that means token limit before sounds is: 8079
 -----------------------
 167 tokens can be saved
 
-currently sitting at 7824
-the tokens we'll save should put us at 7657
-the goal is 7300
-so 357 tokens to go!
-
-
-4 tokens saved by changing small sprites to use spr()
-44 tokens saved by reducing argument usage on return_to_ready_position
-43 tokens saved by converting render_layer into sprite flag data
-24 tokens saved by converting frames_to_death into sprite flag data
-13 tokens saved by converting is_boss_generated into sprite flag data
-20 tokens saved by refactoring filter_out_finished to use del()
-
+currently sitting at 7464
+the tokens we'll save should put us at 7297
 
 entity classes with opportunities for improvement:
 	entity 4: curtains
@@ -95,12 +84,19 @@ entity classes with opportunities for improvement:
 	entity 11: player
 	entity 15: magic_tile
 	entity 22: magic_mirror
+		init
+		on_death
+		decide_next_action
+		appear
+		disappear
+		phase_change
+		despawn_coins
 	entity 24: magic_mirror_hand
 
 where are tokens being used?
-	magic_mirror class				2262 tokens
-		decide_next_action method		237 tokens
-		phase_change method				398 tokens
+	magic_mirror class				2208 tokens
+		decide_next_action method		223 tokens
+		phase_change method				387 tokens
 	other classes					1523 tokens
 	global utility functions		988 tokens
 	player class					685 tokens
@@ -124,7 +120,7 @@ bug: crash relating to promises
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations,skip_title_screen=1,true,false
+local starting_phase,skip_phase_change_animations,skip_title_screen=1,true,true
 
 -- global scene vars
 local next_reflection_color,scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=1,0,0,0,0,0,1,8,0,0,1 -- ,false,false
@@ -177,6 +173,7 @@ local entity_classes={
 		end
 	},
 	-- entity 4: curtains [sprite data 18-23]
+	--   default_counter = animation
 	{
 		-- draw
 		function(self)
@@ -185,14 +182,11 @@ local entity_classes={
 		end,
 		-- update
 		function(self)
-			decrement_counter_prop(self,"anim_frames")
-			self.amount_closed=62*ease_out_in(self.anim_frames/100)
+			self.amount_closed=62*ease_out_in(self.default_counter/100)
 			if self.anim!="open" then
 				self.amount_closed=62-self.amount_closed
 			end
 		end,
-		is_pause_immune=true,
-		anim_frames=0,
 		draw_curtain=function(self,x,dir)
 			rectfill(x-10*dir,0,x+dir*self.amount_closed,127,0)
 			local x2
@@ -202,7 +196,7 @@ local entity_classes={
 			end
 		end,
 		set_anim=function(self,anim)
-			self.anim,self.anim_frames=anim,100
+			self.anim,self.default_counter=anim,100
 		end
 	},
 	-- entity 5: screen [sprite data 24-29]
@@ -214,7 +208,6 @@ local entity_classes={
 			self:check_for_activation()
 		end,
 		x=63,
-		is_pause_immune=true,
 		check_for_activation=function(self)
 			if decrement_counter_prop(self,"frames_until_active") then
 				self.is_active=true
@@ -262,7 +255,7 @@ local entity_classes={
 				function()
 					local n=30
 					if skip_title_screen then
-						curtains.anim_frames,n,title_screen.frames_until_active=0,0,0
+						curtains.default_counter,n,title_screen.frames_until_active=0,0,0
 					end
 					entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},max(0,starting_phase-1),0,1,0 -- ,false
 					-- entity 11: player
@@ -368,9 +361,9 @@ local entity_classes={
 		function(self)
 			self:draw_sprite(5,6,88,ternary(self.frames_alive<150,8,0),11,8)
 		end,
-		is_pause_immune=true
 	},
 	-- entity 11: player [sprite data 60-65]
+	--   default_counter = bump frames
 	{
 		-- draw
 		function(self)
@@ -388,9 +381,9 @@ local entity_classes={
 					sx=44-11*self.step_frames
 				end
 				-- teetering off the edge or bumping into a wall
-				if self.teeter_frames>0 or self.bump_frames>0 then
+				if self.teeter_frames>0 or self.default_counter>0 then
 					sx=66
-					if self.bump_frames<=0 then
+					if self.default_counter<=0 then
 						local c=ternary(self.teeter_frames%4<2,8,9)
 						palt(c,true)
 						pal(17-c,self.secondary_color)
@@ -401,7 +394,7 @@ local entity_classes={
 					else
 						dx+=4-facing*8
 					end
-					if self.teeter_frames<3 and self.bump_frames<3 then
+					if self.teeter_frames<3 and self.default_counter<3 then
 						sx=55
 					end
 				end
@@ -420,7 +413,6 @@ local entity_classes={
 		function(self)
 			decrement_counter_prop(self,"stun_frames")
 			decrement_counter_prop(self,"teeter_frames")
-			decrement_counter_prop(self,"bump_frames")
 			-- try moving
 			self:check_inputs()
 			-- apply moves that were delayed from teetering/stun
@@ -456,7 +448,6 @@ local entity_classes={
 		facing=1, -- 0 = left, 1 = right, 2 = up, 3 = down
 		step_frames=0,
 		teeter_frames=0,
-		bump_frames=0,
 		stun_frames=0,
 		primary_color=12,
 		secondary_color=13,
@@ -464,16 +455,15 @@ local entity_classes={
 		x=35,
 		y=20,
 		check_inputs=function(self)
-			local i
-			for i=0,3 do
-				if btnp(i) then
-					self:queue_step(i)
+			for_each_dir(function(dir)
+				if btnp(dir) then
+					self:queue_step(dir)
 				end
-			end
+			end)
 		end,
 		bump=function(self)
 			self:undo_step()
-			self.bump_frames=11
+			self.default_counter=11
 			freeze_and_shake_screen(0,5)
 		end,
 		undo_step=function(self)
@@ -485,7 +475,7 @@ local entity_classes={
 			end
 		end,
 		step=function(self,dir)
-			if not self.step_dir and self.teeter_frames<=0 and self.bump_frames<=0 and self.stun_frames<=0 then
+			if not self.step_dir and self.teeter_frames<=0 and self.default_counter<=0 and self.stun_frames<=0 then
 				-- sfx(0,0)
 				self.facing,self.step_dir,self.step_frames,self.next_step_dir=dir,dir,4 -- ,nil
 				return true
@@ -516,7 +506,7 @@ local entity_classes={
 		get_hurt=function(self)
 			if self.invincibility_frames<=0 then
 				freeze_and_shake_screen(6,10)
-				player_health.anim,player_health.anim_frames,self.invincibility_frames,self.stun_frames,score_mult="lose",20,60,19,1
+				player_health.anim,player_health.default_counter,self.invincibility_frames,self.stun_frames,score_mult="lose",20,60,19,1
 				if decrement_counter_prop(player_health,"hearts") then
 					-- entity 10: player_figment
 					promises,is_paused,player_health.render_layer,player_figment={},true,16,spawn_entity(10,player.x+23,player.y+65)
@@ -535,6 +525,7 @@ local entity_classes={
 		end
 	},
 	-- entity 12: player_health [sprite data 66-71]
+	--   default_counter = animation frames
 	{
 		-- draw
 		function(self)
@@ -543,9 +534,9 @@ local entity_classes={
 				for i=1,4 do
 					local sprite=0
 					if self.anim=="gain" and i==self.hearts then
-						sprite=mid(1,5-flr(self.anim_frames/2),3)
+						sprite=mid(1,5-flr(self.default_counter/2),3)
 					elseif self.anim=="lose" and i==self.hearts+1 then
-						if self.anim_frames>=15 or (self.anim_frames+1)%4<2 then
+						if self.default_counter>=15 or (self.default_counter+1)%4<2 then
 							sprite=6
 						end
 					elseif i<=self.hearts then
@@ -556,19 +547,18 @@ local entity_classes={
 			end
 		end,
 		-- update
-		function(self)
-			if decrement_counter_prop(self,"anim_frames") then
+		function(self,counter_reached_zero)
+			if counter_reached_zero then
 				self.anim=nil
 			end
 		end,
-		is_pause_immune=true,
 		x=63,
 		y=122,
-		hearts=4,
+		hearts=4
 		-- anim=nil,
-		anim_frames=0
 	},
 	-- entity 13: boss_health [sprite data 72-77]
+	--   default_counter = drain frames
 	{
 		-- draw
 		function(self)
@@ -580,17 +570,15 @@ local entity_classes={
 		-- update
 		function(self)
 			decrement_counter_prop(self,"rainbow_frames")
-			if self.drain_frames>0 then
+			if self.default_counter>0 then
 				self.health-=1
 			end
-			decrement_counter_prop(self,"drain_frames")
 		end,
 		-- x=63,
 		-- y=5,
 		-- visible=false,
 		health=0,
-		rainbow_frames=0,
-		drain_frames=0
+		rainbow_frames=0
 	},
 	-- entity 14: magic_tile_spawn [sprite data 78-83]
 	{
@@ -767,14 +755,14 @@ local entity_classes={
 		end,
 		copy_player=function(self)
 			self.x,self.facing=80-player.x,({1,0,2,3})[player.facing+1]
-			copy_props(player,self,{"y","step_frames","stun_frames","teeter_frames","bump_frames","invincibility_frames","frames_alive"})
+			copy_props(player,self,{"y","step_frames","stun_frames","teeter_frames","default_counter","invincibility_frames","frames_alive"})
 		end
 	},
 	-- entity 17: playing_card [sprite data 96-101]
 	{
 		-- draw
 		function(self)
-			-- spin counter-clockwise when moving left
+			-- spin while moving
 			local sprite=flr(self.frames_alive/4)%4
 			if self.vx<0 then
 				sprite=(6-sprite)%4
@@ -791,20 +779,20 @@ local entity_classes={
 		hitbox_channel=1 -- player
 	},
 	-- entity 18: flower_patch [sprite data 102-107]
+	--   default_counter = hit frames
 	{
 		-- draw
 		function(self)
-			self:draw_sprite(4,4,ternary(self.hit_frames>0,119,ternary(self.frames_to_death>0,110,101)),71,9,8)
+			self:draw_sprite(4,4,ternary(self.default_counter>0,119,ternary(self.frames_to_death>0,110,101)),71,9,8)
 		end,
 		-- update
-		function(self)
-			if decrement_counter_prop(self,"hit_frames") then
+		function(self,counter_reached_zero)
+			if counter_reached_zero then
 				self.hitbox_channel=0
 			end
 		end,
-		hit_frames=0,
 		bloom=function(self)
-			self.frames_to_death,self.hit_frames,self.hitbox_channel=15,4,1
+			self.frames_to_death,self.default_counter,self.hitbox_channel=15,4,1
 			local i
 			for i=1,2 do
 				-- entity 21: particle
@@ -873,6 +861,7 @@ local entity_classes={
 		end
 	},
 	-- entity 22: magic_mirror [sprite data 126-131]
+	--   default_counter = laser charge frames
 	{
 		-- draw
 		function(self,x,y,f)
@@ -904,7 +893,7 @@ local entity_classes={
 					self:draw_sprite(6,15,102,0,13,9)
 				end
 				-- draw laser preview
-				if self.laser_preview_frames%2>0 then
+				if self.default_counter%2>0 then
 					line(x,y+7,x,60,14)
 				end
 			end
@@ -912,20 +901,9 @@ local entity_classes={
 		-- update
 		function(self)
 			local x,y=self.x,self.y
-			decrement_counter_prop(self,"laser_charge_frames")
-			decrement_counter_prop(self,"laser_preview_frames")
 			calc_idle_mult(self,self.frames_alive,2)
 			if boss_health.rainbow_frames>12 then
 				self.draw_offset_x+=scene_frame%2*2-1
-			end
-			-- create particles when charging laser
-			if self.laser_charge_frames>0 then
-				local angle,n=rnd(),ternary_hard_mode(8,18)
-				-- entity 21: particle
-				spawn_entity(21,x+n*self.vx+22*cos(angle),y+22*sin(angle),{
-					color=14,
-					frames_to_death=n
-				}):move(x+n*self.vx,y,n+2,ease_out)
 			end
 		end,
 		x=40,
@@ -933,8 +911,6 @@ local entity_classes={
 		home_x=40,
 		home_y=-28,
 		expression=4,
-		laser_charge_frames=0,
-		laser_preview_frames=0,
 		dark_color=14,
 		light_color=15,
 		idle_mult=0,
@@ -943,7 +919,7 @@ local entity_classes={
 			local props,y={mirror=self,is_reflection=self.is_reflection,dark_color=self.dark_color,light_color=self.light_color,is_boss_generated=self.is_boss_generated},self.y+5
 			-- entity 24: magic_mirror_hand
 			self.left_hand=spawn_entity(24,self.x-18,y,props)
-			self.coins,self.flowers,props.is_right_hand,props.dir={},{},true,1
+			self.coins,props.is_right_hand,props.dir={},true,1
 			-- entity 24: magic_mirror_hand
 			self.right_hand=spawn_entity(24,self.x+18,y,props)
 		end,
@@ -957,10 +933,10 @@ local entity_classes={
 			-- reflected mirror gets a green tone
 			if self.is_reflection then
 				color_wash(self.dark_color)
-				pal(8,self.light_color)
-				pal(7,self.light_color)
-				pal(6,self.light_color)
-				pal(2,ternary(self.is_cracked,self.dark_color,self.light_color))
+				local c
+				for c in all({8,7,6,2}) do
+					pal(c,self.light_color)
+				end
 			end
 		end,
 		-- highest-level commands
@@ -1050,10 +1026,6 @@ local entity_classes={
 								200)
 						else
 							return self:promise_sequence(
-								function()
-									boss_reflection:set_held_state()
-								end,
-								"set_held_state",
 							-- conjure flowers together
 								function()
 									boss_reflection:promise_sequence(
@@ -1148,8 +1120,6 @@ local entity_classes={
 				-- grab handle
 					{rh,"appear"},
 					15,
-					"grab_mirror_handle",
-					5,
 				-- show face
 					{self,"set_expression"},
 					33,
@@ -1253,13 +1223,25 @@ local entity_classes={
 					"return_to_ready_position")
 			end
 		end,
+		for_each=function(self,fn,skip_self) -- todo refactor this out unless it's used at least 3 times
+			fn(self.left_hand)
+			fn(self.right_hand)
+			if not skip_self then
+				fn(self)
+			end
+		end,
 		cancel_everything=function(self)
-			self.left_hand:cancel_everything()
-			self.right_hand:cancel_everything()
-			self:cancel_promises()
-			self:cancel_move()
-			self.laser_charge_frames,self.laser_preview_frames=0,0
-			despawn_boss_entities(entities)
+			self:for_each(function(entity)
+				entity.is_holding_wand=entity:cancel_promises()
+				entity:cancel_move()
+			end)
+			self.default_counter=0
+			-- despawn boss entities
+			foreach(entities,function(entity)
+				if entity.is_boss_generated then
+					entity.finished=true
+				end
+			end)
 		end,
 		-- medium-level commands
 		pound=function(self)
@@ -1268,21 +1250,21 @@ local entity_classes={
 		end,
 		reel=function(self,times)
 			-- entity 26: heart
-			spawn_entity(26,10*rnd_int(3,6)-5,4)
+			self:for_each(function(entity)
+				entity:appear()
+				entity:set_pose()
+			end,spawn_entity(26,10*rnd_int(3,6)-5,4))
 			self.is_cracked=boss_phase>=3
 			return self:promise_sequence(
 				{"set_expression",8},
 				"set_all_idle")
 				:and_then_repeat(times,
-					function()
-						self.x,self.y=mid(10,self.x,70),mid(-40,self.y,-20)
-						local r,r2=rnd_int(-7,7),rnd_int(-7,7)
-						freeze_and_shake_screen(0,3)
-						self:poof(2*r2,-2*r)
-						self.left_hand:promise_sequence("set_pose","appear",{"move",r,r2,6,ease_out,nil,true})
-						self.right_hand:promise_sequence("set_pose","appear",{"move",-r2,r,6,ease_out,nil,true})
-						return self:move(-r,r2,6,ease_out,nil,true)
-					end)
+					{"for_each",function(entity)
+						entity.x,entity.y=mid(10,entity.x,70),mid(-40,entity.y,-20)
+						entity:poof(rnd_int(-10,10),rnd_int(-10,10))
+						entity:move(rnd_int(-7,7),rnd_int(-7,7),6,ease_out,nil,true)
+					end},
+					5)
 		end,
 		throw_hat=function(self)
 			return self:promise_sequence(
@@ -1298,44 +1280,40 @@ local entity_classes={
 					spawn_entity(2,self.x,-32,{parent=self})
 				end,
 				{"move",14,5,3,ease_in,nil,true},
-				30)
+				{self,30})
 		end,
 		conjure_flowers=function(self)
 			-- generate a list of flower locations
-			local locations,i={},0
-			while i<40 do
-				add(locations,{x=i%8*10+5,y=8*flr(i/8)+4})
-				i+=rnd_int(1,3)
-			end
+			local flowers={}
 			-- concentrate
+			self.left_hand:move_to_temple()
 			return self:promise_sequence(
 				"set_all_idle",
-				function()
-					self.left_hand:move_to_temple()
-				end,
 				{self.right_hand,"move_to_temple"},
 				{self,"set_expression",2},
 			-- spawn the flowers
 				function()
-					self.flowers={}
-					local promise,i=self:promise()
+					local promise,locations,i=self:promise(),{},0
+					while i<40 do
+						add(locations,{x=i%8*10+5,y=8*flr(i/8)+4})
+						i+=rnd_int(1,3)
+					end
 					for i=1,#locations do
 						-- shuffle flowers
 						local j=rnd_int(i,#locations)
-						locations[i],locations[j]=locations[j],locations[i]
-						promise=promise:and_then_sequence(
+						locations[i],locations[j],promise=locations[j],locations[i],promise:and_then_sequence(
+							1,
 							function()
 								-- entity 18: flower_patch
-								add(self.flowers,spawn_entity(18,locations[i]))
-							end,
-							1)
+								add(flowers,spawn_entity(18,locations[i]))
+							end)
 					end
 				end,
 				ternary_hard_mode(50,65),
 			-- bloom the flowers
 				function()
 					local flower
-					for flower in all(self.flowers) do
+					for flower in all(flowers) do
 						flower:bloom()
 					end
 				end,
@@ -1349,12 +1327,12 @@ local entity_classes={
 			-- concentrate
 			return self:promise_sequence(
 				"set_all_idle",
-				{"set_expression",2},
 				{lh,"move",23,14,20,ease_in,nil,true},
 				{"set_pose",1})
 			-- wave hand
 				:and_then_repeat(2,
 					{rh,"move",0,0,40,linear,{18,6,-18,6},true})
+			-- poof! the wands appear
 				:and_then_sequence(
 				function()
 					if upgraded_version then
@@ -1363,10 +1341,11 @@ local entity_classes={
 							function()
 								rh.is_holding_wand=true
 							end,
-							{"poof",-10})
+							{"poof",-10},
+							30,
+							"flourish_wand")
 					end
 				end,
-			-- poof! the wands appear
 				{self,"set_expression",1},
 				function()
 					lh.is_holding_wand=true
@@ -1374,11 +1353,6 @@ local entity_classes={
 				{lh,"poof",10},
 				30,
 			-- raise the wands to cast a spell
-				function()
-					if upgraded_version then
-						rh:flourish_wand()
-					end
-				end,
 				{lh,"flourish_wand"},
 				{self,"set_expression",3},
 				5,
@@ -1400,15 +1374,15 @@ local entity_classes={
 			self.left_hand:throw_cards()
 			return self.right_hand:throw_cards()
 		end,
-		throw_coins=function(self,target,num_coins)
+		throw_coins=function(self,target)
 			target=target or player
-			self.left_hand:disappear()
+			-- self.left_hand:disappear()
 			return self:promise_sequence(
 				"set_all_idle",
 				{self.right_hand,"move_to_temple"})
-				:and_then_repeat((num_coins or 4),
-					{self.right_hand,"set_pose",1},
+				:and_then_repeat(4,
 					{self,"set_expression",7},
+					{self.right_hand,"set_pose",1},
 					ternary_hard_mode(5,15),
 					function()
 						local target_x,target_y=10*target:col()-5,8*target:row()-4
@@ -1422,22 +1396,10 @@ local entity_classes={
 								coin.occupies_tile,coin.hitbox_channel=true,5 -- player, coin
 								freeze_and_shake_screen(2,2)
 								if hard_mode then
-									if target_x>5 then
+									for_each_dir(function(dir,dx,dy)
 										-- entity 20: coin_slam
-										spawn_entity(20,target_x-10,target_y,{dir=0})
-									end
-									if target_x<75 then
-										-- entity 20: coin_slam
-										spawn_entity(20,target_x+10,target_y,{dir=1})
-									end
-									if target_y>4 then
-										-- entity 20: coin_slam
-										spawn_entity(20,target_x,target_y-8,{dir=2})
-									end
-									if target_y<36 then
-										-- entity 20: coin_slam
-										spawn_entity(20,target_x,target_y+8,{dir=3})
-									end
+										spawn_entity(20,mid(5,target_x+10*dx,75),mid(4,target_y+8*dy,36),{dir=dir})
+									end)
 								end
 							end,
 							{"move",-2,0,8,ease_in_out,{0,-4,0,-4},true},
@@ -1445,24 +1407,24 @@ local entity_classes={
 								coin.hitbox_channel,coin.hurtbox_channel=1,4 -- player / coin
 							end)
 					end,
-					{self.right_hand,"set_pose",4},
+					{"set_pose",4},
 					{self,"set_expression",3},
-					ternary(boss_phase>=4,21,20))
+					20)
 		end,
 		shoot_lasers=function(self)
 			self.left_hand:disappear()
+			self.right_hand:disappear()
 			local col,num_reflections=rnd_int(0,7),2
 			return self:promise_sequence(
-				{"set_held_state","right"},
 				"set_expression",
 				"set_all_idle"):and_then_repeat(3,
 					function()
-						col=(col+rnd_int(2,ternary(hard_mode and boss_phase>1,3,6)))%8
+						col=(col+rnd_int(2,ternary_hard_mode(3,6)))%8
 						return self:promise_sequence(
 							-- move to a random column
 							{"move",10*col+5,-20,ternary_hard_mode(10,15),ease_in,{0,-10,0,-10}},
 							1,
-							-- charge a laser
+							-- sweep the laser
 							function()
 								if boss_phase>1 and not hard_mode then
 									local dir=2
@@ -1473,12 +1435,13 @@ local entity_classes={
 									self:move(10*dir,0,40,linear,nil,true)
 								end
 							end,
+							-- charge + shoot the laser
 							"shoot_laser",
+							-- spawn a reflection to shoot a laser
 							function()
 								if hard_mode and boss_phase>1 and num_reflections>0 then
 									-- entity 23: magic_mirror_reflection
-									local reflection=spawn_entity(23)
-									reflection:promise():and_then_repeat(num_reflections,
+									spawn_entity(23):promise():and_then_repeat(num_reflections,
 											10,
 											"shoot_laser")
 										:and_then(
@@ -1490,11 +1453,11 @@ local entity_classes={
 		end,
 		shoot_laser=function(self)
 			return self:promise_sequence(
+					ternary_hard_mode(2,12),
 					function()
-						self.laser_charge_frames=10
+						self.default_counter=31
 					end,
-					ternary_hard_mode(9,19),
-					"preview_laser",
+					12,
 					-- shoot a laser
 					{"set_expression",0},
 					function()
@@ -1505,26 +1468,17 @@ local entity_classes={
 					16,
 					-- cooldown
 					"set_expression",
-					"preview_laser")
-		end,
-		preview_laser=function(self)
-			self.laser_preview_frames=5
-			return 5
+					5)
 		end,
 		return_to_ready_position=function(self,expression)--,expression,held_hand)
 			local lh,rh,home_x,home_y=self.left_hand,self.right_hand,self.home_x,self.home_y
-			lh.is_holding_wand,rh.is_holding_wand=false,false
+			lh.is_holding_wand,rh.is_holding_wand=false -- ,false
 			-- reset to a default expression/pose
 			return self:promise_sequence(
 				{lh,"set_pose"},
 				{rh,"set_pose"},
 				{self,"set_all_idle",true},
-				{"set_expression",expression or 1},--expression or 1},
-				-- function()
-				-- 	if abs(home_x-self.x)>12 or abs(home_y-self.y)>12 then
-				-- 		return self:set_held_state(held_hand or "either")
-				-- 	end
-				-- end,
+				{"set_expression",expression or 1},
 			-- move to home location
 				function()
 					self:move(home_x,home_y,15,ease_in)
@@ -1533,26 +1487,7 @@ local entity_classes={
 					rh:move(home_x+18,home_y+5,15,ease_in,{10,-10,20,0})
 					rh:appear()
 				end,
-				10,
-			-- reset state
-				"set_held_state")
-		end,
-		set_held_state=function(self,held_hand)
-			local primary,secondary=self.left_hand,self.right_hand
-			if held_hand=="right" or (held_hand=="either" and secondary.is_holding_mirror) then
-				primary,secondary=secondary,primary
-			end
-			if secondary.is_holding_mirror then
-				secondary:release_mirror()
-			end
-			if primary.is_holding_mirror then
-				if not held_hand then
-					primary:release_mirror()
-				end
-			elseif held_hand then
-				primary:grab_mirror_handle()
-			end
-			return 10
+				15)
 		end,
 		despawn_coins=function(self)
 			local coin
@@ -1563,11 +1498,13 @@ local entity_classes={
 			return 10
 		end,
 		set_all_idle=function(self,idle)
-			self.is_idle,self.left_hand.is_idle,self.right_hand.is_idle=idle,idle,idle
+			self:for_each(function(entity)
+				entity.is_idle=idle
+			end)
 		end,
 		set_expression=function(self,expression)
 			self.expression=expression or 5
-		end,
+		end
 	},
 	-- entity 23: magic_mirror_reflection [sprite data 132-137]
 	{
@@ -1630,9 +1567,6 @@ local entity_classes={
 			self.render_layer=ternary(self.is_reflection,6,ternary(self.is_right_hand,9,8))
 			calc_idle_mult(self,boss.frames_alive+ternary(self.is_right_hand,9,4),4)
 			self:apply_velocity()
-			if self.is_holding_mirror then
-				self.draw_offset_x,self.draw_offset_y,self.x,self.y=m.draw_offset_x,m.draw_offset_y,m.x+2*self.dir,m.y+13
-			end
 			return true
 		end,
 		-- is_right_hand,dir
@@ -1679,25 +1613,6 @@ local entity_classes={
 					freeze_and_shake_screen(0,20)
 				end)
 		end,
-		grab_mirror_handle=function(self)
-			return self:promise_sequence(
-				"set_pose",
-				{"move",self.mirror.x+2*self.dir,self.mirror.y+13,10,ease_out,{10*self.dir,5,0,20}},
-				{"set_pose",2},
-				function()
-					self.is_holding_mirror=true
-				end)
-		end,
-		cancel_everything=function(self)
-			self.is_holding_wand,self.is_holding_mirror=self:cancel_promises() -- nil,nil
-			self:cancel_move()
-		end,
-		release_mirror=function(self)
-			self.is_holding_mirror=false
-			return self:promise_sequence(
-				"set_pose",
-				{"move",15*self.dir,-7,10,ease_in,nil,true})
-		end,
 		appear=function(self)
 			if not self.visible then
 				self.visible=true
@@ -1726,9 +1641,7 @@ local entity_classes={
 				{"move",self.mirror.x+13*self.dir,self.mirror.y,20})
 		end,
 		set_pose=function(self,pose)
-			if not self.is_holding_mirror then
-				self.pose=pose or 3
-			end
+			self.pose=pose or 3
 		end
 	},
 	-- entity 25: mirror_laser [sprite data 144-149]
@@ -1762,7 +1675,7 @@ local entity_classes={
 			-- gain heart
 			if player_health.hearts<4 then
 				player_health.hearts+=1
-				player_health.anim,player_health.anim_frames="gain",10
+				player_health.anim,player_health.default_counter="gain",10
 			end
 			spawn_particle_burst(self,0,6,8,4)
 			self:die()
@@ -1841,7 +1754,7 @@ function _update()
 			local entity=entities[i]
 			if not is_paused or entity.is_pause_immune then
 				-- call the entity's update function
-				if not entity:update() then
+				if not entity:update(decrement_counter_prop(entity,"default_counter")) then
 					entity:apply_velocity()
 				end
 				-- do some default update stuff
@@ -1953,6 +1866,7 @@ function spawn_entity(class_id,x,y,args,skip_init)
 	else
 		-- create default entity
 		entity={
+			default_counter=0,
 			-- lifetime props
 			-- finished=false,
 			frames_alive=0,
@@ -2061,7 +1975,7 @@ function spawn_entity(class_id,x,y,args,skip_init)
 						end_x+anchors[3],end_y+anchors[4],
 						end_x,end_y}
 				}
-				return max(0,dur-1)
+				return dur-1
 			end,
 			cancel_move=function(self)
 				self.vx,self,vy,self.movement=0,0 -- ,nil
@@ -2069,7 +1983,7 @@ function spawn_entity(class_id,x,y,args,skip_init)
 		}
 	end
 	-- load some properties from the sprite sheet flag data
-	entity.render_layer,entity.frames_to_death,entity.is_boss_generated=fget(sid),fget(sid+1),fget(sid+2,0)
+	entity.render_layer,entity.frames_to_death,entity.is_boss_generated,entity.is_pause_immune=fget(sid),fget(sid+1),fget(sid+2,0),fget(sid+2,1)
 	-- add class properties/methods onto it
 	for k,v in pairs(the_class) do
 		entity[k]=v
@@ -2113,20 +2027,12 @@ end
 -- magic tile functions
 function spawn_magic_tile(frames_to_death)
 	if boss_health.health>=60 then
-		boss_health.drain_frames=60
+		boss_health.default_counter=61
 	end
 	-- entity 14: magic_tile_spawn
 	spawn_entity(14,10*rnd_int(1,8)-5,8*rnd_int(1,5)-4,{
 		frames_to_death=frames_to_death or 100
 	})
-end
-
-function despawn_boss_entities(list)
-	foreach(list,function(entity)
-		if entity.is_boss_generated then
-			entity.finished=true
-		end
-	end)
 end
 
 function slide(entity,dir)
@@ -2259,6 +2165,14 @@ end
 
 function format_timer(seconds)
 	return flr(seconds/60)..ternary(seconds%60<10,":0",":")..seconds%60
+end
+
+function for_each_dir(fn)
+	-- dir,dx,dy
+	fn(0,-1,0) -- left
+	fn(1,1,0) -- right
+	fn(2,0,-1) -- up
+	fn(3,0,1) -- down
 end
 
 -- drawing functions
@@ -2497,7 +2411,7 @@ __gfx__
 0d0d0000dd000dddd000dd00ddd00000ddd0ddd00000ddd000000000000000000000000000000000000000000000000000000000000000000000000000000000
 dddddddd0000000ddddd00000ddddddddd000ddddddddd0001000010000100001000010000100001000010000100001000010000100001000010000100001000
 __gff__
-0500000000000978010000000564000000000e00000000001200000000001200000000001200000000001200000000001200000000001100000000000500000000000d00000000000d0000000000050a000000000300010000000500000000000564010000000400010000000500010000000407000000000b80000000000700
+0500000000000978010000000564000000000e00020000001200020000001200000000001200000000001200000000001200000000001100020000000500000000000d00020000000d0000000000050a000000000300010000000500000000000564010000000400010000000500010000000407000000000b80000000000700
 000000000500010000000500000000000a1001000000059600000000090c000000000c03000000000a200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
 010400000c13002500135001350024500185000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500
