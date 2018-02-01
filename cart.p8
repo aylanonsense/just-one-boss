@@ -274,7 +274,7 @@ local entity_classes={
 			self:draw_sprite(11,-43,ternary_hard_mode(69,47),79,22,16)
 			self:draw_prompt("continue")
 		end,
-		x=188,
+		x=192,
 		frames_until_active=130,
 		on_activated=function(self)
 			show_title_screen()
@@ -286,7 +286,7 @@ local entity_classes={
 		-- draw
 		function(self,x,y,f)
 			-- congratulations
-			self:draw_sprite(40,-15,48,95,79,25)
+			self:draw_sprite(41,-15,48,95,79,25)
 			if f>=35 then
 				print_centered(ternary_hard_mode("you really did it!!","you did it!"),x,51,15)
 			end
@@ -329,7 +329,7 @@ local entity_classes={
 		function(self)
 			self:draw_prompt("continue")
 		end,
-		frames_until_active=120,
+		frames_until_active=150,
 		on_activated=function(self)
 			slide(player_health)
 			slide(player_figment)
@@ -968,7 +968,7 @@ local entity_classes={
 							end,
 							"return_to_ready_position",
 							ternary_hard_mode(70,0),
-							{"shoot_lasers",true},
+							{"shoot_lasers",not hard_mode},
 							"return_to_ready_position",
 							"despawn_coins",
 							function()
@@ -1043,11 +1043,11 @@ local entity_classes={
 									boss_reflection:promise_sequence(
 										"despawn_coins",
 										17,
-										{"throw_coins",player_reflection},
+										{"throw_coins",player_reflection,3},
 										"return_to_ready_position")
 								end,
 								"despawn_coins",
-								"throw_coins",
+								{"throw_coins",nil,3},
 								"return_to_ready_position",
 								100)
 						end
@@ -1222,6 +1222,7 @@ local entity_classes={
 			-- despawn boss entities
 			foreach(entities,function(entity)
 				if entity.is_boss_generated then
+					entity:cancel_promises()
 					entity.finished=true
 				end
 			end)
@@ -1358,13 +1359,13 @@ local entity_classes={
 			self.left_hand:throw_cards()
 			return self.right_hand:throw_cards()
 		end,
-		throw_coins=function(self,target)
+		throw_coins=function(self,target,num_coins)
 			target=target or player
 			-- self.left_hand:disappear()
 			return self:promise_sequence(
 				"set_all_idle",
 				{self.right_hand,"move_to_temple"})
-				:and_then_repeat(3,
+				:and_then_repeat(num_coins or 4,
 					{self,"set_expression",7},
 					{self.right_hand,"set_pose",1},
 					ternary_hard_mode(5,15),
@@ -1694,6 +1695,7 @@ function _init()
 	-- create starting entities
 	-- entity 4: curtains
 	-- entity 6: title_screen
+	starting_phase=max(starting_phase,ternary(dget(0)>0,1,0))
 	title_screen,curtains=spawn_entity(6),spawn_entity(4)
 	-- immediately add new entities to the game
 	entities={title_screen,curtains}
@@ -1807,7 +1809,7 @@ function _draw()
 		end
 		if score>0 then
 			-- draw score
-			print(score_text,121-4*#score_text,3)
+			print(score_text,121-4*#score_text,3,1)
 		end
 	end
 	-- draw guidelines
@@ -2121,7 +2123,7 @@ function make_promise(ctx,fn,...)
 end
 
 function show_title_screen()
-	title_screen.x=188
+	title_screen.x=192
 	slide(title_screen)
 	starting_phase,title_screen.frames_until_active,score_data_index,time_data_index,hard_mode=1,115,0,1 -- ,false
 end
@@ -2320,9 +2322,9 @@ __gfx__
 7d7d772d7d777777772777777772277777766666777767767676677daaccbb88ddd7d772d7d7677d77227d7722200555000055000aa0000aaa000000aaa00000
 77d77227d777d7d772d7d777ddddddd776666677777676776777767daaccbb88dd7d77227d777777727727772220005500005500000000aaaaaa000000a00000
 7777277277777d77227d7777ddddddd776667777766777677676776daaccbb88dd77727727777777ddddd7772220005550005500000000aa0aa00000000a0000
-77d72777d777777277277777ddddddd7767777766777676767677661118811cc117772dd7777777ddddddd77222000066000550000000aa000a0000000000000
+77d72777d777777277277777ddddddd776777776677767676767766daaccbb88dd7772dd7777777ddddddd77222000066000550000000aa000a0000000000000
 07ddddddd70077ddddd770077ddddd77007776677770067666766700118811cc1007dddd7777007d72777d70222000055500550000000a000a00000000000000
-06772777760077d277d77006672777660076677777700767767676006666666660067277777600677277776022200000660055000000a0000a00000000000000
+06772777760077d277d7700667277766007667777770076776767600118811cc10067277777600677277776022200000660055000000a0000a00000000000000
 006677766000077277770000666666600007777777000076776670000666666600006677766000066666660022200000660000000000a0000000000000000000
 00006660000000066600000000666000000007770000000076700000000666000000006660000000066600002222222222222222200a00000000000000000000
 00006666666066660000660006666666660066666666666000000000000000900900001111111110222222222222222222222000000000088000800000030000
