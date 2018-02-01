@@ -5,7 +5,7 @@ __lua__
 --by bridgs
 
 -- set cart data (for saving and loading high scores)
-cartdata("bridgs_justoneboss_7_test")
+cartdata("bridgs_justoneboss_8_test")
 
 --[[
 cart data:
@@ -231,7 +231,7 @@ local entity_classes={
 		frames_until_active=5,
 		on_activated=function()
 			curtains:promise_sequence(
-				ternary(skip_title_screen,0,27),
+				ternary(skip_title_screen,0,35),
 				{"set_anim","open"},
 				function()
 					local n=30
@@ -268,8 +268,8 @@ local entity_classes={
 	{
 		-- draw
 		function(self,x)
-			print_centered("thank you for playing!",x,28,rainbow_color)
-			print_centered("created (with love) by bridgs",x,73,6)
+			print_centered("thank you for playing!",x,26,rainbow_color)
+			print_centered("created (with love) by bridgs",x,71,6)
 			print_centered("https://brid.gs",x,83,12)
 			self:draw_sprite(11,-43,ternary_hard_mode(69,47),79,22,16)
 			self:draw_prompt("continue")
@@ -286,17 +286,17 @@ local entity_classes={
 		-- draw
 		function(self,x,y,f)
 			-- congratulations
-			self:draw_sprite(41,-15,48,95,79,25)
+			self:draw_sprite(39,-15,48,95,79,25)
 			if f>=35 then
 				print_centered(ternary_hard_mode("you really did it!!","you did it!"),x,51,15)
 			end
 			-- print score
 			if f>=80 then
-				self.draw_score(x,73,"score:",score.."00",format_timer(timer_seconds))
+				self.draw_score(x,71,"score:",score.."00",format_timer(timer_seconds))
 			end
 			-- print best
 			if f>=115 then
-				self.draw_score(x,81,"best:",dget(score_data_index).."00",format_timer(dget(time_data_index)))
+				self.draw_score(x,79,"best:",dget(score_data_index).."00",format_timer(dget(time_data_index)))
 			end
 			-- show prompt
 			if self:draw_prompt("continue") then
@@ -604,7 +604,7 @@ local entity_classes={
 			score+=score_mult
 			-- entity 29: points
 			spawn_entity(29,self.x,self.y-7,{points=score_mult})
-			local health_change=ternary(boss_phase==0,12,7)
+			local health_change=ternary(boss_phase==0,12,6)
 			local particles=spawn_particle_burst(self,0,ternary(boss_phase>=5,15,25),16,10)
 			local i
 			for i=1,health_change do
@@ -642,12 +642,12 @@ local entity_classes={
 								elseif boss_phase==4 then
 									promises,boss_phase,boss_reflection={},5
 									local i
-									for i=1,17 do
+									for i=1,20 do
 										spawn_magic_tile(20+13*i)
 									end
 									boss:promise_sequence(
 										"cancel_everything",
-										{"reel",60},
+										{"reel",70},
 										"cancel_everything",
 										{"move",40,-20,15,ease_in},
 										20,
@@ -660,7 +660,7 @@ local entity_classes={
 										"die",
 										120,
 										{curtains,"set_anim"}, -- close
-										100,
+										120,
 										function()
 											is_paused=true
 											-- update score
@@ -945,6 +945,7 @@ local entity_classes={
 						else
 							return self:promise_sequence(
 								"return_to_ready_position",
+								15,
 								{self.left_hand,"throw_cards"},
 								{self,"return_to_ready_position"},
 								10,
@@ -1129,7 +1130,7 @@ local entity_classes={
 						self.is_wearing_top_hat=true
 					end,
 					{"poof",0,-10},
-					30)
+					40)
 			elseif boss_phase==1 then
 				if hard_mode then
 					return self:promise_sequence(
