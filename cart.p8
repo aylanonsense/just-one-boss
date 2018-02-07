@@ -141,7 +141,7 @@ bug: init score to account for lost points when skipping the intro
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations,skip_title_screen,start_on_hard_mode=0,false,false,false
+local starting_phase,skip_phase_change_animations,skip_title_screen,start_on_hard_mode=4,false,true,true
 
 -- global scene vars
 local conjure_flowers_counter,next_reflection_color,scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=1,1,0,0,0,0,0,1,8,0,0,0 -- ,false,false
@@ -696,6 +696,7 @@ local entity_classes={
 									end
 									boss:promise_sequence(
 										"cancel_everything",
+										"appear",
 										{"reel",70},
 										"cancel_everything",
 										{"move",40,-20,15,ease_in},
@@ -739,6 +740,7 @@ local entity_classes={
 								else
 									boss:promise_sequence(
 										"cancel_everything",
+										"appear",
 										{"reel",10},
 										10,
 										"set_expression",
@@ -902,36 +904,38 @@ local entity_classes={
 	{
 		-- draw
 		function(self,x,y,f)
-			local expression=self.expression
-			self:apply_colors()
-			if self.visible then
-				-- draw mirror
-				self:draw_sprite(6,12,115,0,13,30)
-			end
-			if self.visible or boss_health.rainbow_frames>0 then
-				-- the face is rainbowified after the player hits a tile
-				if boss_health.rainbow_frames>0 then
-					color_wash(rainbow_color)
-					if expression>0 and expression!=5 and boss_phase>0 then
-						pal(13,5)
+			if self.really_visible then
+				local expression=self.expression
+				self:apply_colors()
+				if self.visible then
+					-- draw mirror
+					self:draw_sprite(6,12,115,0,13,30)
+				end
+				if self.visible or boss_health.rainbow_frames>0 then
+					-- the face is rainbowified after the player hits a tile
+					if boss_health.rainbow_frames>0 then
+						color_wash(rainbow_color)
+						if expression>0 and expression!=5 and boss_phase>0 then
+							pal(13,5)
+						end
+						expression=8
 					end
-					expression=8
+					-- draw face
+					if expression>0 then
+						self:draw_sprite(5,7,11*expression-11,57,11,14,false,expression==5 and f%4<2)
+					end
 				end
-				-- draw face
-				if expression>0 then
-					self:draw_sprite(5,7,11*expression-11,57,11,14,false,expression==5 and f%4<2)
-				end
-			end
-			pal()
-			self:apply_colors()
-			if self.visible then
-				-- draw top hat
-				if self.is_wearing_top_hat then
-					self:draw_sprite(6,15,102,0,13,9)
-				end
-				-- draw laser preview
-				if self.default_counter%2>0 then
-					line(x,y+7,x,60,14)
+				pal()
+				self:apply_colors()
+				if self.visible then
+					-- draw top hat
+					if self.is_wearing_top_hat then
+						self:draw_sprite(6,15,102,0,13,9)
+					end
+					-- draw laser preview
+					if self.default_counter%2>0 then
+						line(x,y+7,x,60,14)
+					end
 				end
 			end
 		end,
@@ -945,6 +949,7 @@ local entity_classes={
 		end,
 		x=40,
 		y=-28,
+		really_visible=true,
 		home_x=40,
 		home_y=-28,
 		expression=4,
@@ -1057,25 +1062,61 @@ local entity_classes={
 							"return_to_ready_position")
 					elseif boss_phase==4 then
 						if hard_mode then
-							local n=0
+							local n,m=0,0
 							return self:promise_sequence(
+								-- hat barrage
 								"return_to_ready_position",
-								10)
+								10,
+								{self.left_hand,"disappear"})
 								:and_then_repeat(5,
-									8,
 									function()
 										spawn_reflection(40-20*n,
-											15,
+											8*n,
 											{"throw_hat",nil,1},
-											80-8*n,
+											32-8*n,
 											"reform")
 										n=(n+1)%5
-										if n==0 then
-											boss:disappear()
-										end
 									end)
 								:and_then_sequence(
-								200)
+								{self,"disappear"},
+								120,
+								"appear",
+								20)
+								-- laser barrage
+								:and_then_repeat(4,
+									5,
+									"disappear",
+									{"set_expression",5},
+									function()
+										m=m%4+1
+										local col=rnd_int(0,7)
+										local i
+										for i=1,3 do
+											col=(col+2)%8
+											spawn_reflection(10*col-35,
+												7,
+												{"shoot_laser",m==4},
+												"reform")
+										end
+										if m==4 then
+											return self:promise_sequence(
+												40,
+												function()
+													spawn_reflection(-50,
+														{"set_expression",1},
+														"appear",
+														25,
+														"throw_cards",
+														60,
+														"reform")
+												end,
+												177)
+										else
+											return 66
+										end
+									end,
+									{"set_expression",1},
+									"appear")
 						else
 							return self:promise_sequence(
 							-- conjure flowers together
@@ -1132,13 +1173,13 @@ local entity_classes={
 					self:decide_next_action()
 				end)
 		end,
-		-- appear=function(self)
-		-- 	self.visible=true
-		-- 	self.left_hand:appear()
-		-- 	self.right_hand:appear()
-		-- end,
+		appear=function(self)
+			self.really_visible=true
+			self.left_hand:appear()
+			self.right_hand:appear()
+		end,
 		disappear=function(self)
-			self.visible=false
+			self.really_visible=false
 			self.left_hand:disappear()
 			self.right_hand:disappear()
 		end,
@@ -1529,7 +1570,7 @@ local entity_classes={
 							end)
 					end)
 		end,
-		shoot_laser=function(self)
+		shoot_laser=function(self,long_duration)
 			return self:promise_sequence(
 					ternary_hard_mode(2,12),
 					function()
@@ -1542,9 +1583,12 @@ local entity_classes={
 					function()
 						freeze_and_shake_screen(0,4)
 						-- entity 25: mirror_laser
-						spawn_entity(25,self,nil,{parent=self})
+						local laser=spawn_entity(25,self,nil,{parent=self})
+						if long_duration then
+							laser.frames_to_death=150
+						end
 					end,
-					16,
+					ternary(long_duration,166,16),
 					-- cooldown
 					"set_expression",
 					5)
@@ -1606,9 +1650,9 @@ local entity_classes={
 			copy_props(boss.right_hand,self.right_hand,props)
 		end,
 		reform=function(self)
-			self:move(boss.x,boss.y,10)
-			self.left_hand:move(boss.left_hand.x,boss.left_hand.y,10)
-			self.right_hand:move(boss.right_hand.x,boss.right_hand.y,10)
+			self:move(boss.x,boss.y,10,ease_out)
+			self.left_hand:move(boss.left_hand.x,boss.left_hand.y,10,ease_out)
+			self.right_hand:move(boss.right_hand.x,boss.right_hand.y,10,ease_out)
 			return self:promise_sequence(10,"die")
 		end
 	},
@@ -2482,7 +2526,7 @@ __gfx__
 0d0d0000dd000dddd000dd00ddd00000ddd0ddd00000ddd215511111551551110000000011115511111155155111115515511111551551111155155111115511
 dddddddd0000000ddddd00000ddddddddd000ddddddddd0211555555511155550000011155555111555551115555555111555555511155555551115555555111
 __gff__
-0500000000000978010001000564000000000e00020000001200020000001200020500001200020500001200020500001200020500001100020000000500000002000d00020000000d0000000000050a000000000300010000000500000b02000564010001000400010000000500010000000407000001000b80000000000700
+0500000000000978010001000564000000000e00020000001200020000001200020500001200020500001200020500001200020500001100020000000500000002000d00020000000d0000000000050a000000000300010000000500000b02000b64010001000400010000000500010000000407000001000b80000000000700
 000000000500011600000500000000000a1001000100059600000000090c000000000c03000000000a200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __map__
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
