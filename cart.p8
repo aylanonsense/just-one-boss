@@ -5,7 +5,7 @@ __lua__
 --by bridgs
 
 -- set cart data (for saving and loading high scores)
-cartdata("bridgs_justoneboss_playtest_1")
+cartdata("bridgs_justoneboss_playtest_2")
 
 --[[
 cart data:
@@ -55,6 +55,8 @@ sound effects:
 	44:	bass walk a
 	45:	drum solo
 	46:	drum solo #2
+	47:	trumpet game over melody
+	47:	drums game over
 	...
 
 music:
@@ -62,9 +64,8 @@ music:
 	8-10:	boss intro
 	11-...:	boss fight
 	...		title screen
-	...		death screen
+	...		game over screen
 	...		victory screen
-
 
 audio channels:
 		music		sfx
@@ -89,27 +90,21 @@ coordinates:
             ^     ^
            c=1   c=2
 
-
-bugs
-	ease_in_out does not exist?
-	after beating game, ui is displayed around title screen
-music
-.	longer boss fight music
-.	boss fight intro when starting on phases 2-4
-.	menu music (4 sounds)
-.	death music (6 sounds)
-.	victory music (8 sounds)
 todo
-	reflection and player should break coin at same time
+.	longer boss fight music
+.	intro to boss fight music when starting on phases 2-4
+.	menu music (4 sounds)
+.	game over music (6 sounds)
+.	victory music (8 sounds)
 .	the spell cast sound is lame
 .	the menu advance tone is a bit sad :(
 .	heart sound could be happier and louder
-hard mode:
-.	coin ting interrupted by coin slam sound
-.	need a wwoooooooooeeeeooow sound during hard mode phase change to phase 2
-.	need a reflection spawn sound
-.	hat needs to not be on same channel as coin and it needs a better, bouncier sound
-.	need extended laser sound for phase 4
+.	[hard mode] coin ting interrupted by coin slam sound
+.	[hard mode] need a wwoooooooooeeeeooow sound during hard mode phase change to phase 2
+.	[hard mode] need a reflection spawn sound
+.	[hard mode] hat needs to not be on same channel as coin and it needs a better, bouncier sound
+.	[hard mode] need extended laser sound for phase 4
+.	bunny sound could be way cuter
 ]]
 
 -->/8
@@ -119,7 +114,7 @@ hard mode:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations,skip_title_screen,start_on_hard_mode=1,false,true,false
+local starting_phase,skip_phase_change_animations,skip_title_screen,start_on_hard_mode=0,false,false,false
 
 -- global scene vars
 local conjure_flowers_counter,next_reflection_color,scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=1,1,0,0,0,0,0,1,8,0,0,0 -- ,false,false
@@ -187,6 +182,7 @@ local entity_classes={
 				self.amount_closed=62-self.amount_closed
 			end
 		end,
+		is_curtains=true,
 		draw_curtain=function(self,x,dir)
 			rectfill(x-10*dir,0,x+dir*self.amount_closed,127,0)
 			local x2
@@ -264,9 +260,9 @@ local entity_classes={
 	{
 		-- draw
 		function(self,x)
-			print_centered("thank you for playing!",x,26,rainbow_color)
-			print_centered("created (with love) by bridgs",x,71,6)
-			print_centered("https://brid.gs",x,83,12)
+			print_centered("thank you for playing!",x+0.5,26,rainbow_color)
+			print_centered("created (with love) by bridgs",x+0.5,71,6)
+			print_centered("https://brid.gs",x+0.5,83,12)
 			self:draw_sprite(11,-43,ternary_hard_mode(69,47),79,22,16)
 			self:draw_prompt("continue")
 		end,
@@ -284,7 +280,7 @@ local entity_classes={
 			-- congratulations
 			self:draw_sprite(39,-15,48,95,79,25)
 			if f>=35 then
-				print_centered(ternary_hard_mode("you really did it!!","you did it!"),x,51,15)
+				print_centered(ternary_hard_mode("you really did it!!","you did it!"),x+0.5,51,15)
 			end
 			-- print score
 			if f>=80 then
@@ -315,10 +311,10 @@ local entity_classes={
 			print(label_text,x-42.5,y,7)
 			print(score_text,x+9.5-4*#score_text,y)
 			print(time_text,x+45.5-4*#time_text,y)
-			spr(173,x+18,y)
+			spr(173,x+18.5,y)
 		end
 	},
-	-- entity 9: death_screen [sprite data 48-53]
+	-- entity 9: game_over_screen [sprite data 48-53]
 	--   extends entity 5: screen
 	{
 		-- draw
@@ -438,9 +434,18 @@ local entity_classes={
 					end
 					-- bump into an obstacle or reflection
 					if occupant or (player_reflection and (self.prev_col<5)!=(col<5)) then
+						if player_reflection then
+							player_reflection:copy_player()
+							if get_tile_occupant(player_reflection) then
+								get_tile_occupant(player_reflection):get_bumped()
+							end
+						end
 						self:bump()
 						if occupant then
 							occupant:get_bumped()
+						end
+						if player_reflection then
+							player_reflection:copy_player()
 						end
 					end
 				end
@@ -448,14 +453,14 @@ local entity_classes={
 			return true
 		end,
 		hurtbox_channel=1, -- player
-		facing=1, -- 0 = left, 1 = right, 2 = up, 3 = down
+		facing=0, -- 0 = left, 1 = right, 2 = up, 3 = down
 		step_frames=0,
 		teeter_frames=0,
 		stun_frames=0,
 		primary_color=12,
 		secondary_color=13,
 		tertiary_color=0,
-		x=35,
+		x=45,
 		y=20,
 		check_inputs=function(self)
 			for_each_dir(function(dir)
@@ -480,7 +485,7 @@ local entity_classes={
 		end,
 		step=function(self,dir)
 			if not self.step_dir and self.teeter_frames<=0 and self.default_counter<=0 and self.stun_frames<=0 then
-				if boss_health.health<=0 and boss_phase<=0 then
+				if boss_health.health<=0 and boss_phase<=0 and not boss then
 					sfx(29,1) -- player step
 				end
 				self.facing,self.step_dir,self.step_frames,self.next_step_dir=dir,dir,4 -- ,nil
@@ -519,15 +524,19 @@ local entity_classes={
 					-- entity 10: player_figment
 					promises,is_paused,player_health.render_layer,player_figment={},true,16,spawn_entity(10,player.x+23,player.y+65)
 					music(-1)
-					-- entity 9: death_screen
+					-- entity 9: game_over_screen
 					spawn_entity(9)
 					player_figment:promise_sequence(
 						35,
 						{"move",63,72,60})
 					curtains:set_anim() -- close
 					player_health:promise_sequence(
-						65,
-						{"move",62.5,45,60,ease_in_out,{-60,10,-40,10}})
+						35,
+						function()
+							music(34)
+						end,
+						30,
+						{"move",62.5,45,60,linear,{-60,10,-40,10}})
 					player:die()
 				end
 			end
@@ -751,6 +760,9 @@ local entity_classes={
 			self:copy_player()
 			if (prev_col!=self:col() or prev_row!=self:row()) and get_tile_occupant(self) then
 				get_tile_occupant(self):get_bumped()
+				if get_tile_occupant(player) then
+					get_tile_occupant(player):get_bumped()
+				end
 				player:bump()
 				self:copy_player()
 			end
@@ -1242,7 +1254,7 @@ local entity_classes={
 							for i=1,5 do
 								-- entity 23: magic_mirror_reflection
 								spawn_entity(23):promise_sequence(
-									{"move",0,0,40,ease_in_out,{40*cos(i/5),40*sin(i/5),40*cos((i+1)/5),40*sin((i+1)/5)},true},
+									{"move",0,0,40,linear,{40*cos(i/5),40*sin(i/5),40*cos((i+1)/5),40*sin((i+1)/5)},true},
 									2,
 									"die")
 							end
@@ -1504,7 +1516,7 @@ local entity_classes={
 									end)
 								end
 							end,
-							{"move",-2,0,8,ease_in_out,{0,-4,0,-4},true},
+							{"move",-2,0,8,linear,{0,-4,0,-4},true},
 							function()
 								coin.hitbox_channel,coin.hurtbox_channel=1,4 -- player / coin
 							end)
@@ -1919,24 +1931,23 @@ function _draw()
 		if entity.render_layer>=13 then
 			camera(shake_x)
 		end
+		if entity.is_curtains then
+			if score_mult>0 then
+				-- draw score multiplier
+				draw_sprite(6,2,69,71,11,7)
+				print(score_mult,8,3,0)
+			end
+			if timer_seconds>0 then
+				-- draw timer
+				print(format_timer(timer_seconds),7,120,1)
+			end
+			if score>0 then
+				-- draw score
+				print(score_text,121-4*#score_text,3,1)
+			end
+		end
 		entity:draw2()
 	end)
-	-- draw the ui
-	if not is_paused then
-		if score_mult>0 then
-			-- draw score multiplier
-			draw_sprite(6,2,69,71,11,7)
-			print(score_mult,8,3,0)
-		end
-		if timer_seconds>0 then
-			-- draw timer
-			print(format_timer(timer_seconds),7,120,1)
-		end
-		if score>0 then
-			-- draw score
-			print(score_text,121-4*#score_text,3,1)
-		end
-	end
 	-- draw guidelines
 		-- camera()
 		-- color(3)
@@ -2137,7 +2148,7 @@ end
 function slide(entity,dir)
 	dir=dir or 1
 	-- entity.x+=dir*2
-	entity:move(-dir*129,0,100,ease_in_out,{dir*70,0,0,0},true)
+	entity:move(-dir*129,0,100,linear,{dir*70,0,0,0},true)
 	return entity
 end
 
@@ -2609,6 +2620,9 @@ __sfx__
 01100000091300913109121091110c1300c1210c1300c1210e1300e1310e1210e1110f1300f1310f1210f111101301012110130101210f1300f1210f1300f1210e1300e1310e1210e1110c1300c1310c1210c111
 0108000018620186210c611246051862500600006003063500503005031860524615306153c6253c62530630246212461100600186150060000600306353c5000050300503306253c5000050300503005033c500
 0108000018620186210c611006001862500600006001861500615006150c625186251863524635306353c635306303062124611005033c6203c61100503186253452034521345113451134625005030060030625
+011800001c2401c2321c2221c2111c2401c2311c2211a2411524015231152211624017240172321723215221132401323113231132211321112211102401023210232102320e2320e2220c221102311023110211
+01180000186350000000000000001863500000000001863524630186210c6210000000000000000000000000000000000024630186210c621000001863524630186210c621246301862118635186300c62100611
+01100000186350060000600186050060000000186350000024630186210c6210000000000186351863518635186350060000600186050060000000186350000024630186210c62100000186300c6210062100000
 __music__
 01 20426044
 00 21656144
@@ -2628,4 +2642,21 @@ __music__
 00 23632044
 00 2d426d44
 02 2e426e44
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 41424344
+00 2f423044
 
