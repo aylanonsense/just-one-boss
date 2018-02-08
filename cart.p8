@@ -29,7 +29,7 @@ sound effects:
 	18:	player heal
 	19: player teeter
 	20:	player bump
-	21:	coin flip
+	21:	coin flip / coin death
 	22:	coin land
 	23:	spell cast
 	24:	menu advance
@@ -38,7 +38,8 @@ sound effects:
 	27:	bouquet reveal
 	28:	bouquet hide
 	29:	player step
-	...
+	30:	reflection spawn
+	31:	reflection intro
 	32:	drums
 	33:	drums #2
 	34:	drums #3
@@ -48,8 +49,9 @@ sound effects:
 	38:	piano melody
 	39:	piano melody #2
 	40:	trumpet melody
-	41:	piano melody #3
-	...
+	41:	piano intro
+	42:	piano intro #2
+	43:	trumpet intro
 	44:	bass walk a
 	45:	drum solo
 	46:	drum solo #2
@@ -68,8 +70,8 @@ audio channels:
 		music		sfx
 		-----		---
 	0:	melody		player hurt / player heal
-	1:	bass		laser / flower spawn / flower bloom / coin flip / coin land / spell cast / hat throw / player step
-	2:	percussion	card throw / poof / forceful poof / pound / player bump / bunny spawn
+	1:	bass		laser / flower spawn / flower bloom / coin flip / coin death / coin land / spell cast / hat throw / player step / reflection intro
+	2:	percussion	card throw / poof / forceful poof / pound / player bump / bunny spawn / reflection spawn
 	3:	-			tile spawn / tile collect / tile particle / bouquet reveal / bouquet hide / player teeter
 
 -- player hurt / boss sounds (high priority), player sounds (low priority)
@@ -88,34 +90,26 @@ coordinates:
            c=1   c=2
 
 
-bug: ease_in_out does not exist?
-bug: hard mode credits revert to normal mode credits on activation
-bug: after beating game, ui is displayed around title screen
-bug: crash relating to promises
-bug: init score to account for lost points when skipping the intro
-
+bugs
+	ease_in_out does not exist?
+	after beating game, ui is displayed around title screen
+music
+.	longer boss fight music
+.	boss fight intro when starting on phases 2-4
+.	menu music (4 sounds)
+.	death music (6 sounds)
+.	victory music (8 sounds)
 todo
-	boss intro music
-	peeps should be able to start from where they left off with a score penalty
-	longer boss fight music
-	put the drum solo into the melody line
-	death music
-	victory music
-	make flower and bouquet sounds use the same voice
-	coin destroyed sound
-	the spell cast sound is lame
 	reflection and player should break coin at same time
-	bunny sound doesn't play
-	the boss reels for a long time at the end
-	the menu advance tone is a bit sad :(
-	heart sound could be happier and louder
+.	the spell cast sound is lame
+.	the menu advance tone is a bit sad :(
+.	heart sound could be happier and louder
 hard mode:
-	coin ting interrupted by coin slam sound
-	need a wwoooooooooeeeeooow sound during hard mode phase change to phase 2
-	need a reflection spawn sound
-	hat needs to not be on same channel as coin and it needs a better, bouncier sound
-	need extended laser sound for phase 4
-	credits screen changes to normal mode after advancing through the menu
+.	coin ting interrupted by coin slam sound
+.	need a wwoooooooooeeeeooow sound during hard mode phase change to phase 2
+.	need a reflection spawn sound
+.	hat needs to not be on same channel as coin and it needs a better, bouncier sound
+.	need extended laser sound for phase 4
 ]]
 
 -->/8
@@ -125,7 +119,7 @@ hard mode:
 function noop() end
 
 -- global debug vars
-local starting_phase,skip_phase_change_animations,skip_title_screen,start_on_hard_mode=4,false,true,true
+local starting_phase,skip_phase_change_animations,skip_title_screen,start_on_hard_mode=1,false,true,false
 
 -- global scene vars
 local conjure_flowers_counter,next_reflection_color,scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,is_paused,hard_mode=1,1,0,0,0,0,0,1,8,0,0,0 -- ,false,false
@@ -145,9 +139,9 @@ local entity_classes={
 		-- update
 		function(self)
 			if self.frames_alive%15==0 then
-				sfx(25,2) -- bunny spawn
 				-- entity 3: bunny
 				spawn_entity(3,self,nil,{vx=rnd_dir()*(1+rnd(2)),vy=-1-rnd(2)}):poof()
+				sfx(25,2) -- bunny spawn
 			end
 		end
 	},
@@ -248,6 +242,9 @@ local entity_classes={
 		end,
 		-- update
 		function(self)
+			if self.is_active then
+				hard_mode=false
+			end
 			self:check_for_activation()
 			if self.is_active and btnp(0) and dget(0)>0 then
 				hard_mode,score_data_index,time_data_index,self.is_active=true,2,3 -- ,false
@@ -256,39 +253,10 @@ local entity_classes={
 		end,
 		frames_until_active=5,
 		on_activated=function()
-			sfx(9,3) -- game start
 			music(0) -- "tutorial"
-			curtains:promise_sequence(
-				ternary(skip_title_screen,0,35),
-				{"set_anim","open"},
-				function()
-					local n=30
-					if skip_title_screen then
-						curtains.default_counter,n,title_screen.frames_until_active,hard_mode=0,0,0,start_on_hard_mode
-					end
-					entities,boss_phase,score,score_mult,timer_seconds,is_paused={title_screen,curtains},max(0,starting_phase-1),0,0,0 -- ,false
-					-- entity 11: player
-					-- entity 12: player_health
-					-- entity 13: boss_health
-					player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity(11),spawn_entity(12),spawn_entity(13) -- ,nil,...
-					-- hard_mode=true -- todo debug remove
-					if starting_phase>0 then
-						-- entity 22: magic_mirror
-						boss=spawn_entity(22)
-						boss.visible,boss_health.visible=true,true
-						boss:promise_sequence(n,"intro")
-						-- todo remove debug schtuff -> 19 tokens
-						if starting_phase>1 then
-							boss.is_wearing_top_hat=true
-						end
-						if starting_phase>3 then
-							-- entity 16: player_reflection
-							player_reflection=spawn_entity(16)
-						end
-					else
-						spawn_magic_tile(150+n)
-					end
-				end)
+			sfx(9,3) -- game start
+			score,score_mult,timer_seconds,entities=ternary(starting_phase>0,40,0),0,0,{title_screen,curtains}
+			start_game(starting_phase)
 		end
 	},
 	-- entity 7: credit_screen [sprite data 36-41]
@@ -355,13 +323,37 @@ local entity_classes={
 	{
 		-- draw
 		function(self)
-			self:draw_prompt("continue")
+			-- hard mode prompt
+			if self:draw_prompt("retry") then
+				pal(13,5)
+				print_centered("or    to return to menu",63,108)
+				-- spr(190,36,107,true)
+				spr(190,28,107,1,1,true)
+			end
+		end,
+		-- update
+		function(self)
+			self:check_for_activation()
+			if self.is_active and btnp(0) then
+				-- give up
+				self.is_active=false
+				slide(self,-1)
+				slide(player_health,-1)
+				slide(player_figment,-1)
+				show_title_screen(-1)
+			end
 		end,
 		frames_until_active=150,
 		on_activated=function(self)
+			-- continue
 			slide(player_health)
 			slide(player_figment)
-			show_title_screen()
+			score,score_mult,entities=ternary(boss_phase<=1,40,0),0,{title_screen,curtains,self,player_health,player_figment}
+			self.frames_to_death,player_health.frames_to_death,player_figment.frames_to_death=100,100,100
+			if boss_phase<=1 then
+				timer_seconds=0
+			end
+			start_game(boss_phase)
 		end
 	},
 	-- entity 10: player_figment [sprite data 54-59]
@@ -677,13 +669,13 @@ local entity_classes={
 									music(-1)
 									promises,boss_phase,boss_reflection={},5
 									local i
-									for i=1,20 do
+									for i=1,10 do
 										spawn_magic_tile(20+13*i)
 									end
 									boss:promise_sequence(
 										"cancel_everything",
 										"appear",
-										{"reel",70},
+										{"reel",35},
 										"cancel_everything",
 										{"move",40,-20,15,ease_in},
 										20,
@@ -848,6 +840,7 @@ local entity_classes={
 		end,
 		on_death=function(self)
 			spawn_particle_burst(self,0,6,6,4)
+			sfx(21,1) -- coin death
 		end
 	},
 	-- entity 20: coin_slam [sprite data 114-119]
@@ -1028,6 +1021,7 @@ local entity_classes={
 										"throw_cards",
 										13,
 										"die")
+									sfx(30,2) -- reflection spawn
 								end
 							end,
 							"return_to_ready_position",
@@ -1252,6 +1246,7 @@ local entity_classes={
 									2,
 									"die")
 							end
+							sfx(31,1) -- reflection intro
 						end,
 						75)
 				else
@@ -1865,9 +1860,9 @@ function _update()
 		filter_out_finished(promises)
 		-- update entities
 		local num_entities=#entities
-		for i=1,num_entities do
+		for i=1,min(#entities,num_entities) do
 			local entity=entities[i]
-			if entity and not is_paused or entity.is_pause_immune then
+			if entity and (not is_paused or entity.is_pause_immune) then
 				-- call the entity's update function
 				if not entity:update(decrement_counter_prop(entity,"default_counter")) then
 					entity:apply_velocity()
@@ -1884,8 +1879,8 @@ function _update()
 		if not is_paused then
 			local i,j
 			-- don't use all() or it may cause slowdown / also we don't want to update all entities
-			for i=1,num_entities do
-				for j=1,num_entities do
+			for i=1,min(#entities,num_entities) do
+				for j=1,min(#entities,num_entities) do
 					local entity,entity2=entities[i],entities[j]
 					if i!=j and band(entity.hitbox_channel,entity2.hurtbox_channel)>0 and entity:is_hitting(entity2) and entity2.invincibility_frames<=0 then
 						entity2:on_hurt(entity)
@@ -2252,10 +2247,44 @@ function make_promise(ctx,fn,...)
 	}
 end
 
-function show_title_screen()
-	title_screen.x=192
-	slide(title_screen)
-	starting_phase,title_screen.frames_until_active,score_data_index,time_data_index,hard_mode=1,115,0,1 -- ,false
+function start_game(phase)
+	curtains:promise_sequence(
+		ternary(skip_title_screen,0,35),
+		{"set_anim","open"},
+		function()
+			local n=30
+			if skip_title_screen then
+				curtains.default_counter,n,title_screen.frames_until_active,hard_mode=0,0,0,start_on_hard_mode
+			end
+			boss_phase,is_paused=max(0,phase-1) -- ,false
+			-- entity 11: player
+			-- entity 12: player_health
+			-- entity 13: boss_health
+			player,player_health,boss_health,player_reflection,player_figment,boss,boss_reflection=spawn_entity(11),spawn_entity(12),spawn_entity(13) -- ,nil,...
+			-- hard_mode=true -- todo debug remove
+			if phase>0 then
+				-- entity 22: magic_mirror
+				boss=spawn_entity(22)
+				boss.visible,boss_health.visible=true,true
+				boss:promise_sequence(n,"intro")
+				-- todo remove debug schtuff -> 19 tokens
+				if phase>1 then
+					boss.is_wearing_top_hat=true
+				end
+				if phase>3 then
+					-- entity 16: player_reflection
+					player_reflection=spawn_entity(16)
+				end
+			else
+				spawn_magic_tile(150+n)
+			end
+		end)
+end
+
+function show_title_screen(dir)
+	title_screen.x=ternary(dir==-1,-66,192)
+	slide(title_screen,dir)
+	starting_phase,title_screen.frames_until_active,score_data_index,time_data_index=1,115,0,1
 end
 
 function spawn_reflection(dx,...)
@@ -2264,6 +2293,7 @@ function spawn_reflection(dx,...)
 	reflection.left_hand:move(unpack(params))
 	reflection.right_hand:move(unpack(params))
 	reflection:promise_sequence({"move",unpack(params)},1,...)
+	sfx(30,2) -- reflection spawn
 end
 
 function format_timer(seconds)
@@ -2547,7 +2577,7 @@ __sfx__
 010500001c6601a650186501364007620006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0105000010560105611c5701c57109500095000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500
 010b000000200095400c1510d1510f151282612825128261282512826128251231310020000200002000020000200002000000000000000000000000000000000000000000000000000000000000000000000000
-010800002875500700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700
+010800001775500700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700
 01080000287612d7712d7612d7512d741007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000000000000000000000
 0107000034640286511c65110641046411c450284511c441284411c43128421000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 010600001c2301c2511f2512825128245282452823500200002000020000200002000020000200002000020000200002000020000200002000020000200002000020000200002000020000200002000020000200
@@ -2559,8 +2589,8 @@ __sfx__
 011000001055010531105210000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 01080000106500e6511c1551c165000001c1550010000100001000010000100001000010000100001000010000100001000010000100001000010000100001000010000100001000010000100001000000000000
 010a00001064410670106301062100600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000000000000
-011000001a05028041280210000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-01100000280501a0411a0210000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+011000001a75028741287210000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+01100000287501a7411a7210000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 010c00001301000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -2573,9 +2603,9 @@ __sfx__
 011000002f5302f5212f5212f511285302853128521285002e5302e5212e5212d5302d5212d5212b5302b5212f5302f5212f5212f511285302852128521285002e5302d5202b5302d5302d5212d5212b5302b521
 011000002f5302f5212f5212f511285302853128521285002e5302e5212e5212d5302d5252d5352b5302b52128530285212852128511285002850026500265002653027530275212853028521285212851128500
 011000001c2301c2211c22118221152311523115221152111b2301b2211b2211a2301a2221a22218230182211c2301c2111c2301c211152201521115220152111b230182201b230182111a2211c2211f23123231
-011000002f5302f5212853028521285212851100000000002e5372f5272e5202f5302f5212f5212f5112f5112f5302f5212853028521285212851100000000000000000000000000000000000000000000000000
-011000002f5402f531285402853128531285210000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-011000002f1202f1212f1122f1112812028121281111c1002e1372d1272b1272d1202d1212d1212b1202b12128120281212811100000000000000000000000002612027122271222812028121281112810000000
+011000002f5302f5212853028521285212851100000000002e5372f5272e5202f5302f5212f5212f5112f5112f5302f52128530285212b530285302b5302e5302d5302d5212b5302853028531285212852128511
+01100000265302652128530005000050000500005000050028530285212b53000500005000050000500005002d5302b52028530285212d5302b52028530285212b5302b5212b5402b5312d5402d5312e5402e531
+011000000050000000000000050010230102211023010221005000050000500005001f2301f2211f2301f221000000000000000000000000000000000000000000000000001f2301f22121230212212222122221
 01100000091300913109121091110c1300c1210c1300c1210e1300e1310e1210e1110f1300f1310f1210f111101301012110130101210f1300f1210f1300f1210e1300e1310e1210e1110c1300c1310c1210c111
 0108000018620186210c611246051862500600006003063500503005031860524615306153c6253c62530630246212461100600186150060000600306353c5000050300503306253c5000050300503005033c500
 0108000018620186210c611006001862500600006001861500615006150c625186251863524635306353c635306303062124611005033c6203c61100503186253452034521345113451134625005030060030625
@@ -2588,11 +2618,9 @@ __music__
 00 23632044
 00 23632044
 02 24642044
-01 69422044
 00 69422044
-00 6a422044
-00 65422044
-00 65422044
+00 29422044
+00 2a2b2044
 01 26232044
 00 27232044
 00 282c2044
