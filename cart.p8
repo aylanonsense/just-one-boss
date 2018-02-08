@@ -1182,7 +1182,7 @@ local entity_classes={
 				return self:return_to_ready_position()
 			elseif boss_phase==0 then
 				return self:promise_sequence(
-					64,
+					66,
 					{lh,"appear"},
 					20)
 				-- shake finger
@@ -1195,18 +1195,18 @@ local entity_classes={
 					20,
 				-- grab handle
 					{rh,"appear"},
-					15,
+					10,
 					{"move",-16,8,10,ease_out,{10,0,10,5},true},
 					{"set_pose",2},
 				-- show face
 					{self,"set_expression"},
 					33,
 					{"set_expression",6},
-					25,
+					28,
 					"set_expression",
-					33,
+					34,
 					{"set_expression",1},
-					30,
+					5,
 				-- tap mirror
 					function()
 						lh:promise_sequence(
@@ -1225,7 +1225,7 @@ local entity_classes={
 						self.is_wearing_top_hat=true
 					end,
 					{"poof",0,-10},
-					40)
+					35)
 			elseif boss_phase==1 then
 				if hard_mode then
 					return self:promise_sequence(
@@ -2143,7 +2143,7 @@ end
 
 function calc_idle_mult(entity,f,n)
 	entity.idle_mult=mid(0,entity.idle_mult+ternary(entity.is_idle,0.05,-0.05),1)
-	entity.draw_offset_x,entity.draw_offset_y=entity.idle_mult*3*sin(f/60),entity.idle_mult*n*sin(f/30)
+	entity.draw_offset_x,entity.draw_offset_y=entity.idle_mult*3*sin(f/64),entity.idle_mult*n*sin(f/32)
 end
 
 function copy_props(source,target,props)
