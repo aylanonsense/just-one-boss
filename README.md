@@ -1,2 +1,2 @@
-# pico-tile-rush
-A boss-rush game on a grid.
+# just-one-boss
+A PICO-8 game in which you duel a charming opponent!

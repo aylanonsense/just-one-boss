@@ -94,7 +94,7 @@ music:
 	0-7:	"tutorial"
 	8-10:	boss intro
 	11-18:	boss fight
-	34-35:	game over screen
+	35-36:	game over screen
 	37-42:	menu music
 	47-48:	victory riff
 
@@ -537,7 +537,7 @@ local entity_classes={
 					player_health:promise_sequence(
 						35,
 						function()
-							music(34) -- game over music
+							music(35) -- game over music
 						end,
 						30,
 						{"move",62.5,45,60,linear,{-60,10,-40,10}})
