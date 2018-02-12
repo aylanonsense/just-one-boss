@@ -4,10 +4,31 @@ __lua__
 --just one boss
 --by bridgs
 
--- set cart data (for saving and loading high scores)
-cartdata("bridgs_justoneboss")
-
 --[[
+hello there! happy to see you
+crack open this cart. my name
+is bridgs, and i made this game
+in early 2018.
+
+i really wanted to pack a lot
+into this game, which meant
+doing a ton of token-crunching
+and manual code minification.
+unfortunately, that makes it a
+lot harder for people like you
+to come in and have fun hacking
+at the game. 'pologies!
+
+to make it up to you, i'm
+happy to serve as a resource.
+if you have any questions about
+the code or the architecture of
+this game, feel free to message
+me on twitter: @bridgs_dev
+
+oh and also... thank you for
+playing!
+
 cart data:
 	0:	high score
 	1:	best time in seconds
@@ -15,8 +36,10 @@ cart data:
 	3:	best time in seconds (hard mode)
 
 sound effects:
-	0:	ambient bass
-	...
+	0:	menu music bass
+	1:	menu music melody
+	2:	menu music melody #2
+	3:	menu music melody #3
 	7:	extended laser
 	8:	tile spawn
 	9:	tile collect / game start / score beaten
@@ -37,7 +60,6 @@ sound effects:
 	24:	menu advance
 	25:	bunny spawn
 	26:	hat throw
-	...
 	28:	bouquet hide
 	29:	player step
 	30:	reflection spawn
@@ -47,7 +69,6 @@ sound effects:
 	34:	drums #3
 	35:	bass walk e
 	36:	bass walk e #2
-	...
 	38:	boss fight melody
 	39:	boss fight melody #2
 	40:	boss fight melody #3
@@ -62,7 +83,6 @@ sound effects:
 	49:	bass walk b -> a
 	50:	boss fight melody #4
 	51:	boss fight melody #5
-	...
 	58:	game over melody #2
 	59:	restart intro melody
 	60:	victory drums #2
@@ -73,10 +93,10 @@ sound effects:
 music:
 	0-7:	"tutorial"
 	8-10:	boss intro
-	11-...:	boss fight
+	11-18:	boss fight
 	34-35:	game over screen
-	37-...:	ambient music
-	47-...:	victory music
+	37-42:	menu music
+	47-48:	victory riff
 
 audio channels:
 		music		sfx
@@ -86,23 +106,13 @@ audio channels:
 	2:	percussion	card throw / poof / forceful poof / pound / player bump / bunny spawn / reflection spawn / hat throw
 	3:	-			tile spawn / tile collect / tile particle / bouquet reveal / bouquet hide / player teeter
 
-coordinates:
-  +x is right, -x is left
-  +y is down / towards the screen, -y is up / away from the screen
-           x=1   x=2.5
-            v     v
-          +---+---+
-    y=1 > |   |   | < r=1
-          +---+---+
-          |   |   |
-  y=2.5 > +---+---+ < r=2
-            ^     ^
-           c=1   c=2
-
 ]]
 
--->/8
+-->8
 -- global variable declarations
+
+-- set cart data (for saving and loading high scores)
+cartdata("bridgs_justoneboss")
 
 -- useful noop function
 function noop() end
@@ -113,7 +123,7 @@ local starting_phase,skip_phase_change_animations,skip_title_screen,start_on_har
 -- global scene vars
 local conjure_flowers_counter,next_reflection_color,scene_frame,freeze_frames,screen_shake_frames,timer_seconds,score_data_index,time_data_index,rainbow_color,boss_phase,score,score_mult,promises,entities,title_screen,player,player_health,player_reflection,player_figment,boss,boss_health,boss_reflection,curtains,is_paused,hard_mode=1,1,0,0,0,0,0,1,8,0,0,0,{} -- ,nil,...
 
--->/8
+-->8
 -- entity classes
 local entity_classes={
 	-- entity 1: top_hat [sprite data 0-5]
@@ -325,7 +335,7 @@ local entity_classes={
 			self:check_for_activation()
 			if self.is_active and btnp(0) then
 				-- give up
-				self.is_active=music(37) -- ambient music
+				self.is_active=music(37) -- menu music
 				slide(self,-1)
 				slide(player_health,-1)
 				slide(player_figment,-1)
@@ -1824,10 +1834,10 @@ local entity_classes={
 	}
 }
 
--->/8
+-->8
 -- main functions
 function _init()
-	music(37) -- ambient music
+	music(37) -- menu music
 	-- create starting entities
 	-- entity 4: curtains
 	-- entity 6: title_screen
@@ -1967,7 +1977,7 @@ function _draw()
 	-- print("promises: "..#promises,2,123,ternary(#promises>30,8,3))
 end
 
--->/8
+-->8
 -- spawn_entity function
 function spawn_entity(class_id,x,y,args,skip_init)
 	if type(x)=="table" then
@@ -2110,7 +2120,7 @@ function spawn_entity(class_id,x,y,args,skip_init)
 	return entity
 end
 
--->/8
+-->8
 -- helper functions
 
 -- particle functions
@@ -2652,9 +2662,9 @@ __music__
 00 32312044
 00 23632044
 00 2d426d44
-00 2e426e44
+02 2e426e44
 00 35232044
-02 35232044
+00 35232044
 00 41424344
 00 41424344
 00 41424344
