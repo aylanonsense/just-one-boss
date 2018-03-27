@@ -1,0 +1,113 @@
+﻿<html>
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <title>PICO-8 Cartridge</title>
+        <meta name="description" content="">
+
+<STYLE TYPE="text/css">
+<!--
+body {
+	margin: 0;
+	padding: 0;
+}
+
+canvas#canvas { width: 512px; height: 512px; }
+
+.pico8_el {
+	float:left;
+	width:92px;
+	display:inline-block; 
+  	margin: 0;
+	padding: 0;
+	text-align: center;
+	color:#fff;
+	background-color:#777;
+	font-family : verdana;
+	font-size: 9pt;
+	cursor: pointer;
+	cursor: hand;
+}
+.pico8_el a{
+	text-decoration: none;
+	color:#fff;
+}
+
+.pico8_el:hover{
+	background-color:#aaa;
+}
+
+.pico8_el:link{
+	background-color:#aaa;
+}
+
+canvas{
+    image-rendering: optimizeSpeed;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: optimize-contrast;
+    image-rendering: pixelated;
+    -ms-interpolation-mode: nearest-neighbor;
+    border: 0px
+}
+
+-->
+</STYLE>
+    
+</head>
+
+<body bgcolor=#000000>
+
+	<center><div style="width:512px;">
+
+	<canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+
+	<script type="text/javascript">
+		var canvas = document.getElementById("canvas");
+		canvas.width = window.innerWidth;
+		canvas.height = window.innerHeight;
+
+		// show Emscripten environment where the canvas is
+		// arguments are passed to PICO-8
+		
+		var Module = {};
+		Module.canvas = canvas;
+		
+		/*
+			// When pico8_buttons is defined, PICO-8 takes each int to be a live bitfield
+			// representing the state of each player's buttons
+			
+			var pico8_buttons = [0, 0, 0, 0, 0, 0, 0, 0]; // max 8 players
+			pico8_buttons[0] = 2 | 16; // example: player 0, RIGHT and Z held down
+			
+			// when pico8_gpio is defined, reading and writing to gpio pins will
+			// read and write to these values
+			var pico8_gpio = new Array(128);
+		*/
+	</script>
+
+	<script async type="text/javascript" src="just_one_boss.js"></script>
+	  
+	<script>
+		// key blocker. prevent cursor keys from scrolling page while playing cart.
+		
+		function onKeyDown_blocker(event) {
+			event = event || window.event;
+			var o = document.activeElement;
+			if (!o || o == document.body || o.tagName == "canvas")
+			{
+				if ([32, 37, 38, 39, 40].indexOf(event.keyCode) > -1)
+				{
+					if (event.preventDefault) event.preventDefault();
+				}
+			}
+		}
+
+		document.addEventListener('keydown', onKeyDown_blocker, false);
+
+	</script>
+
+	</div></center>
+</body></html>
+
+
