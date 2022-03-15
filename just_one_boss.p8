@@ -2,7 +2,7 @@ pico-8 cartridge // http://www.pico-8.com
 version 16
 __lua__
 --just one boss
---by bridgs
+--by ayla~nonsense (formerly bridgs)
 
 --[[
 hello there! happy to see you
@@ -24,7 +24,7 @@ happy to serve as a resource.
 if you have any questions about
 the code or the architecture of
 this game, feel free to message
-me on twitter: @bridgs_dev
+me on twitter: @aylanonsense
 
 oh and also... thank you for
 playing!
